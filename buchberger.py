@@ -383,7 +383,7 @@ def dp_nf(p , G):
     Nweight = p.Nweight
     h = copy.deepcopy(p)
     r = DPolynomial(h.Nvar , h.Nweight , h.weightMat)
-    HMG = [(p , p.tip) for p in G if p!=0]
+    HMG = [(p.normalize() , p.tip) for p in G if p!=0]
     if h==0:return 0
     while True:
         m = h.tip
@@ -399,11 +399,12 @@ def dp_nf(p , G):
         for (p1,m1) in HMG:
             rem = idiv(m,m1)
             if rem!=None:
+                w_rem = isub(w_h , p1.weights[m1])
                 c1 = p1.coeffs[m1]
                 for (m2,c2) in p1.coeffs.items():
                     m3 = iadd(rem , m2)
-                    if c2!=0 and not m3 in h.weights:
-                        h.weights[m3] = isub(iadd(p1.weights[m2] , w_h) , p1.weights[m1])
+                    if not m3 in h.weights:
+                        h.weights[m3] = iadd(p1.weights[m2] , w_rem)
                     h.coeffs[m3] = h.coeffs.get(m3,0) - Fraction(c2*c_h,c1)
                     if h.coeffs[m3]==0:
                         del h.coeffs[m3]
