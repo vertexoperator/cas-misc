@@ -380,6 +380,7 @@ def deglex(Nvar):
 
 
 def dp_nf(p , G):
+    Nweight = p.Nweight
     h = copy.deepcopy(p)
     r = DPolynomial(h.Nvar , h.Nweight , h.weightMat)
     HMG = [(p , p.tip) for p in G if p!=0]
@@ -394,6 +395,7 @@ def dp_nf(p , G):
         if c_h==0:
             del h.coeffs[m]
             continue
+        w_h = h.weights[m]
         for (p1,m1) in HMG:
             rem = idiv(m,m1)
             if rem!=None:
@@ -401,16 +403,15 @@ def dp_nf(p , G):
                 for (m2,c2) in p1.coeffs.items():
                     m3 = iadd(rem , m2)
                     if c2!=0 and not m3 in h.weights:
-                        h.weights[m3] = isub(iadd(p1.weights[m2] , h.weights[m]) , p1.weights[m1])
+                        h.weights[m3] = isub(iadd(p1.weights[m2] , w_h) , p1.weights[m1])
                     h.coeffs[m3] = h.coeffs.get(m3,0) - Fraction(c2*c_h,c1)
                     if h.coeffs[m3]==0:
                         del h.coeffs[m3]
-                h._normalized = False
-                h.normalize()
+                        del h.weights[m3]
                 break
         else:
             del h.coeffs[m]
-            r.weights[m] = h.weights[m]
+            r.weights[m] = w_h
             del h.weights[m]
             r.coeffs[m] = c_h
     return r
@@ -429,7 +430,7 @@ def dp_buchberger(_G):
     def tdeg(p):
         return max( [sum(m) for m in p.coeffs.keys()] )
     nf_time = 0.0
-    Nobs = 0
+    Nobs,ZR,NZR = 0,0,0
     G = [q*Fraction(1,q.coeffs[q.tip]) for q in _G if q!=0]
     #-- inter-reduce
     while True:
@@ -480,7 +481,10 @@ def dp_buchberger(_G):
         h = dp_nf(tp*p - tq*q , [t for (tf,t) in zip(masks,G) if tf])
         t1 = time.time()
         nf_time += (t1-t0)
-        if h==0:continue
+        if h==0:
+            ZR+=1
+            continue
+        NZR+=1
         h = h*Fraction(1 , h.coeffs[h.tip])
         #-- useless pair elimination of  Gebauer-Moeller
         RED = []
@@ -517,7 +521,7 @@ def dp_buchberger(_G):
         masks.append( True )
         sugars.append( s_h )
         B.sort(key=lambda x:(x[5],x[4]) , reverse=True)
-        print("{0} obstruction killed ({1} obstructions left) nb={2} nab={3}".format(Nobs , len(B) , sum(masks), len(G)))
+        print("{0} obstruction killed nb={1} nab={2} rp={3}".format(Nobs ,sum(masks), len(G) ,len(B)))
     #-- find reduced basis
     G = [p for (tf,p) in zip(masks,G) if tf] 
     RG = []
@@ -525,7 +529,7 @@ def dp_buchberger(_G):
         p = dp_nf(p,RG+G[n+1:])
         if p!=0:RG.append( p*Fraction(1,p.coeffs[p.tip]) )
     assert(len(G)==len(RG)),"G should be minimal bases"
-    print("total obstructions={0} , NF time={1:.3f}\n".format(Nobs,nf_time))
+    print("total obstructions={0} , NF time={1:.3f} ZR={2} NZR={3}\n".format(Nobs,nf_time,ZR,NZR))
     return RG
 
 
