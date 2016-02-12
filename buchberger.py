@@ -425,6 +425,9 @@ def p_nf(p , G , vars , order):
 
 import time
 def dp_buchberger(_G):
+    NoSugar = False
+    def tdeg(p):
+        return max( [sum(m) for m in p.coeffs.keys()] )
     nf_time = 0.0
     Nobs = 0
     G = [q*Fraction(1,q.coeffs[q.tip]) for q in _G if q!=0]
@@ -443,6 +446,7 @@ def dp_buchberger(_G):
               break
        if ok:break
     G = [p for p in G if p!=0]
+    sugars = [tdeg(p) for p in G]
     masks = [True]*len(G)
     if len(G)==0:return []
     #-- find first obstructions
@@ -454,10 +458,14 @@ def dp_buchberger(_G):
               #-- Buchberger's product criterion to avoid unnecessary reduction
               if all([min(i1,i2)==0 for (i1,i2) in zip(mp,mq)]):continue
               mpq = tuple([max(i1,i2) for (i1,i2) in zip(mp,mq)])
-              B.append( (i , j , idiv(mpq,mp) , idiv(mpq,mq) , mpq ) )
-    B.sort(key=lambda x:x[4] , reverse=True)
+              if NoSugar:
+                  s_pq = 0
+              else:
+                  s_pq = max(sugars[i]+sum(mpq)-sum(mp) , sugars[j]+sum(mpq)-sum(mq))
+              B.append( (i , j , idiv(mpq,mp) , idiv(mpq,mq) , mpq , s_pq) )
+    B.sort(key=lambda x:(x[5],x[4]) , reverse=True)
     while len(B)>0:
-        i,j,um,vm,_ = B.pop()
+        i,j,um,vm,_,s_h = B.pop()
         Nobs+=1
         p,q = G[i],G[j]
         tp = DPolynomial(p.Nvar , p.Nweight , p.weightMat)
@@ -480,7 +488,7 @@ def dp_buchberger(_G):
         for obs in B:
             rem = idiv(obs[4] , htip)
             if rem==None:continue
-            i,j,_,_,mfg = obs
+            i,j,_,_,mfg,_ = obs
             ftip,gtip = G[i].tip,G[j].tip
             mfh = tuple([max(i1,i2) for (i1,i2) in zip(ftip,htip)])
             mgh = tuple([max(i1,i2) for (i1,i2) in zip(gtip,htip)])
@@ -492,20 +500,24 @@ def dp_buchberger(_G):
         for i,p in enumerate(G):
             if not masks[i]:continue
             mp , ms = p.tip , h.tip
-            #-- Buchberger's product criterion to avoid unnecessary reduction
-            if all([min(i1,i2)==0 for (i1,i2) in zip(mp,ms)]):continue
             mps = tuple([max(i1,i2) for (i1,i2) in zip(mp,ms)])
+            if iadd(mp,ms)==mps:continue
             if any([obs[0]<i and obs[1]==len(G) and obs[4]==mps for obs in B]):
                 continue
             if any([tf and idiv(mps , g.tip)!=None for (tf,g) in zip(masks,G)]):
-                B.append( (i , len(G) , idiv(mps,mp) , idiv(mps,ms) , mps) )
+                if NoSugar:
+                   s_ps = 0
+                else:
+                   s_ps = max(sugars[i]+sum(mps)-sum(mp) , s_h+sum(mps)-sum(ms))
+                B.append( (i , len(G) , idiv(mps,mp) , idiv(mps,ms) , mps , s_ps) )
         for n,p in enumerate(G):
             rem = idiv(p.tip , h.tip)
             if rem!=None:masks[n] = False
         G.append( h )
         masks.append( True )
-        B.sort(key=lambda x:x[4] , reverse=True)
-        print("found {0}-th basis ({1} obstructions left) ({2} valid bases)".format(len(G) , len(B) , sum(masks)))
+        sugars.append( s_h )
+        B.sort(key=lambda x:(x[5],x[4]) , reverse=True)
+        print("{0} obstruction killed ({1} obstructions left) nb={2} nab={3}".format(Nobs , len(B) , sum(masks), len(G)))
     #-- find reduced basis
     G = [p for (tf,p) in zip(masks,G) if tf] 
     RG = []
