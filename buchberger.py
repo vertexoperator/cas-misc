@@ -129,7 +129,7 @@ class Polynomial(object):
        assert(isinstance(n,int))
        assert(n>=0)
        ret = 1
-       for _ in xrange(n):
+       for _ in range(n):
            ret *= self
        return ret
    """
@@ -166,7 +166,10 @@ class Polynomial(object):
            elif idx==0:
                terms.append( "%s*%s" % (str(c),str(m)) )
            elif len(m.degs.keys())==0:
-               terms.append( "+ " + str(c) )
+               if c<0:
+                  terms.append( "- " + str(-c) )
+               else:
+                  terms.append( "+ " + str(c) )
            elif c==1:
                terms.append( "+ " + str(m) )
            elif c==-1:
@@ -201,6 +204,10 @@ def iadd(v1,v2):
     return tuple([(c1+c2) for (c1,c2) in zip(v1,v2)])
 
 
+def isub(v1,v2):
+    return tuple([(c1-c2) for (c1,c2) in zip(v1,v2)])
+
+
 def idiv(v1,v2):
     ret = []
     for (c1,c2) in zip(v1,v2):
@@ -211,6 +218,7 @@ def idiv(v1,v2):
 
 
 class DPolynomial:
+   __slots__ = ["Nvar","Nweight","coeffs","weights","weightMat","_normalized"]
    def __init__(self , Nvar , Nweight , weightMat):
        self.Nvar = Nvar
        self.Nweight = Nweight
@@ -342,7 +350,7 @@ def p2dp(p , vars , weightMat):
     return ret
 
 
-#-- 全次数逆辞書式順序
+#-- graded reverse lexcographic order
 def grevlex(Nvar):
     weightMat = [[0]*Nvar for _ in range(Nvar+1)]
     for i in range(Nvar+1):
@@ -352,6 +360,24 @@ def grevlex(Nvar):
     return weightMat
 
 
+#-- pure lexicographic order
+def purelex(Nvar):
+    weightMat = [[0]*Nvar for _ in range(Nvar)]
+    for i in range(Nvar):
+        for j in range(Nvar):
+           if i==j:weightMat[i][j] = 1
+    return weightMat
+
+
+#-- total degree lexicographic order
+def deglex(Nvar):
+    weightMat = [[0]*Nvar for _ in range(Nvar+1)]
+    for i in range(Nvar+1):
+        for j in range(Nvar):
+           if i==0:weightMat[i][j] = 1
+           elif i==j:weightMat[i][j] = 1
+    return weightMat
+
 
 def dp_nf(p , G):
     h = copy.deepcopy(p)
@@ -359,44 +385,50 @@ def dp_nf(p , G):
     HMG = [(p , p.tip) for p in G if p!=0]
     if h==0:return 0
     while True:
-        if h==0:break
         m = h.tip
+        if h==0:break
         c_h = h.coeffs[m]
         if sum(m)==0:
             r.coeffs[m] = c_h
             break
+        if c_h==0:
+            del h.coeffs[m]
+            continue
         for (p1,m1) in HMG:
             rem = idiv(m,m1)
             if rem!=None:
                 c1 = p1.coeffs[m1]
                 for (m2,c2) in p1.coeffs.items():
                     m3 = iadd(rem , m2)
+                    if c2!=0 and not m3 in h.weights:
+                        h.weights[m3] = isub(iadd(p1.weights[m2] , h.weights[m]) , p1.weights[m1])
                     h.coeffs[m3] = h.coeffs.get(m3,0) - Fraction(c2*c_h,c1)
+                    if h.coeffs[m3]==0:
+                        del h.coeffs[m3]
                 h._normalized = False
-                h.normalize()  #-- recomputing weights
+                h.normalize()
                 break
         else:
             del h.coeffs[m]
-            r.coeffs[m] = h.weights[m]
+            r.weights[m] = h.weights[m]
             del h.weights[m]
             r.coeffs[m] = c_h
     return r
 
 
-def p_nf(p , G , vars , order=None):
-    if order==None:
-       order = grevlex(len(vars))
+def p_nf(p , G , vars , order):
     G = [p2dp(q,vars,order) for q in G]
     r = p2dp(p,vars,order)
     r = dp_nf(r,G)
     return dp2p(r,vars)
 
 
-#-- no optimization
+import time
 def dp_buchberger(_G):
+    nf_time = 0.0
+    Nobs = 0
     G = [q*Fraction(1,q.coeffs[q.tip]) for q in _G if q!=0]
-    #-- interreduce
-    """
+    #-- inter-reduce
     while True:
        ok = False
        for n,p in enumerate(G):
@@ -410,7 +442,6 @@ def dp_buchberger(_G):
               ok = True
               break
        if ok:break
-    """
     G = [p for p in G if p!=0]
     masks = [True]*len(G)
     if len(G)==0:return []
@@ -420,11 +451,14 @@ def dp_buchberger(_G):
        for j,q in enumerate(G):
            if i<j:
               mp , mq = p.tip , q.tip
+              #-- Buchberger's product criterion to avoid unnecessary reduction
+              if all([min(i1,i2)==0 for (i1,i2) in zip(mp,mq)]):continue
               mpq = tuple([max(i1,i2) for (i1,i2) in zip(mp,mq)])
-              B.append( (i , j , idiv(mpq,mp) , idiv(mpq,mq) , mpq) )
+              B.append( (i , j , idiv(mpq,mp) , idiv(mpq,mq) , mpq ) )
     B.sort(key=lambda x:x[4] , reverse=True)
     while len(B)>0:
         i,j,um,vm,_ = B.pop()
+        Nobs+=1
         p,q = G[i],G[j]
         tp = DPolynomial(p.Nvar , p.Nweight , p.weightMat)
         tq = DPolynomial(q.Nvar , q.Nweight , q.weightMat)
@@ -434,21 +468,55 @@ def dp_buchberger(_G):
         tq._normalized = False
         tp.normalize()
         tq.normalize()
-        s = dp_nf(tp*p - tq*q , G)
-        if s==0:continue
-        s = s*Fraction(1 , s.coeffs[s.tip])
+        t0 = time.time()
+        h = dp_nf(tp*p - tq*q , [t for (tf,t) in zip(masks,G) if tf])
+        t1 = time.time()
+        nf_time += (t1-t0)
+        if h==0:continue
+        h = h*Fraction(1 , h.coeffs[h.tip])
+        #-- useless pair elimination of  Gebauer-Moeller
+        RED = []
+        htip = h.tip
+        for obs in B:
+            rem = idiv(obs[4] , htip)
+            if rem==None:continue
+            i,j,_,_,mfg = obs
+            ftip,gtip = G[i].tip,G[j].tip
+            mfh = tuple([max(i1,i2) for (i1,i2) in zip(ftip,htip)])
+            mgh = tuple([max(i1,i2) for (i1,i2) in zip(gtip,htip)])
+            if mfh!=mfg and mgh!=mfg:
+                 RED.append( obs )
+        for obs in RED:
+            B.remove(obs)
+        #-- new obstructions
         for i,p in enumerate(G):
-            mp , ms = p.tip , s.tip
+            if not masks[i]:continue
+            mp , ms = p.tip , h.tip
+            #-- Buchberger's product criterion to avoid unnecessary reduction
+            if all([min(i1,i2)==0 for (i1,i2) in zip(mp,ms)]):continue
             mps = tuple([max(i1,i2) for (i1,i2) in zip(mp,ms)])
-            B.append( (i , len(G) , idiv(mps,mp) , idiv(mps,ms) , mps) )
-        G.append( s )
+            if any([obs[0]<i and obs[1]==len(G) and obs[4]==mps for obs in B]):
+                continue
+            if any([tf and idiv(mps , g.tip)!=None for (tf,g) in zip(masks,G)]):
+                B.append( (i , len(G) , idiv(mps,mp) , idiv(mps,ms) , mps) )
+        for n,p in enumerate(G):
+            rem = idiv(p.tip , h.tip)
+            if rem!=None:masks[n] = False
+        G.append( h )
+        masks.append( True )
         B.sort(key=lambda x:x[4] , reverse=True)
+        print("found {0}-th basis ({1} obstructions left) ({2} valid bases)".format(len(G) , len(B) , sum(masks)))
     #-- find reduced basis
+    G = [p for (tf,p) in zip(masks,G) if tf] 
     RG = []
     for n,p in enumerate(G):
         p = dp_nf(p,RG+G[n+1:])
         if p!=0:RG.append( p*Fraction(1,p.coeffs[p.tip]) )
+    assert(len(G)==len(RG)),"G should be minimal bases"
+    print("total obstructions={0} , NF time={1:.3f}\n".format(Nobs,nf_time))
     return RG
+
+
 
 
 def groebner(_G , vars , order):
@@ -467,7 +535,34 @@ def eqset(X , Y):
 
 
 if __name__=="__main__":
-    x,y = Variable("x"),Variable("y")
+    x,y,z = Variable("x"),Variable("y"),Variable("z")
     GB = groebner([x*y+2 , x*x*x+x],[x,y],grevlex(2))
-    assert( eqset(GB , [x - Fraction(1,2)*y , y*y+4]) ),GB
+    assert( eqset(GB , [x - Fraction(1,2)*y , y*y+4]) ),"test-1 failed"
+    assert( eqset(groebner([-x**3+y, x**2*y-z], [x,y,z], grevlex(3)),[x**3 - y, y*(x**2) - z, y**2 - x*z]) ),"test-2 failed"
+    assert( eqset(groebner([x*x*x-2*x*y , x*x*y-2*y*y+x],[x,y],grevlex(2)),[x**2, y**2 - Fraction(1,2)*x, y*x]) ),"test-3 failed"
+    assert( eqset(groebner([x*x*x-2*x*y , x*x*y-2*y*y+x],[x,y],purelex(2)),[-2*y**2 + x, y**3]) ),"test-4 failed"
+    #-- test-5
+    x,y,z,w = Variable("x"),Variable("y"),Variable("z"),Variable("w")
+    GB5 = [y**2*x*z - w, y**2*x*w - z, z**2, w**2, z*w]
+    assert( eqset(groebner([x*y*y*z-w , y*y*z*w,x*y*y*w-z],[x,y,z,w],grevlex(4)),GB5) )
+    #-- katsura-2 benchmark
+    u0,u1,u2 = Variable("u0"),Variable("u1"),Variable("u2")
+    I = [u0+2*u2+2*u1-1,2*u1*u0+2*u1*u2-u1,u0**2-u0+2*u2**2+2*u1**2]
+    GB = [2*u2 - 1 + 2*u1 + u0, Fraction(1,5)*u2 - Fraction(3,5)*u2**2 - Fraction(1,5)*u1 + u1**2, 
+          Fraction(-2,5)*u2 + Fraction(6,5)*u2**2 - Fraction(1,10)*u1 + u1*u2, 
+          Fraction(1,70)*u2 - Fraction(79,210)*u2**2 + Fraction(1,30)*u1 + u2**3]
+    assert( eqset(groebner(I , [u0,u1,u2] , grevlex(3)) , GB) ),"katsura-2 failed"
+    #--katsura-3
+    u0,u1,u2,u3 = Variable("u0"),Variable("u1"),Variable("u2"),Variable("u3")
+    I = [u0+2*u3+2*u2+2*u1-1,2*u2*u0+2*u1*u3-u2+u1**2,2*u1*u0+2*u2*u3+2*u1*u2-u1,u0**2-u0+2*u3**2+2*u2**2+2*u1**2]
+    GB = groebner(I,[u0,u1,u2,u3],grevlex(4))
+    assert(len(GB)==7),"katsura-3 failed"
+    #-- homogenized katsura-4
+    h,u0,u1,u2,u3,u4 = Variable("h"),Variable("u0"),Variable("u1"),Variable("u2"),Variable("u3"),Variable("u4")
+    I = [u0+2*u3+2*u2+2*u1+2*u4-h,2*u3*u0-u3*h+2*u1*u2+2*u4*u1,
+         2*u2*u0+2*u1*u3+(2*u4-h)*u2+u1**2,
+         2*u1*u0+(2*u2+2*u4)*u3+2*u1*u2-u1*h,
+         u0**2-u0*h+2*u3**2+2*u2**2+2*u1**2+2*u4**2]
+    GB = groebner(I,[h,u0,u1,u2,u3,u4],grevlex(6))
+    assert(len(GB)==13),"h-katsura-4 failed"
 

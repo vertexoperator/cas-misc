@@ -352,6 +352,7 @@ N変数(非可換)単項式を、(単項式順序を保つように)単一の自
 
 """
 class DExpression(object):
+    __slots__ = ["Nvar" , "coeffs" , "_simplified"]
     def __init__(self , Nvar):
         self.Nvar = Nvar
         self.coeffs = {0:0}
@@ -630,6 +631,7 @@ def dp_obs(p0 , p1):
            rm = rm0
            while rm>0:
               if im_mul(m0 , rm , Nvar)==im_mul(lm , m1 , Nvar):
+                  assert(rm!=m1 and m0!=lm)
                   ret.append( (0 , p0 , rm , lm , p1 , 0) )
               rm = im_lpop(rm , Nvar)
            lm = im_rpop(lm , Nvar)
@@ -641,6 +643,7 @@ def dp_obs(p0 , p1):
            rm = rm0
            while rm>0:
               if im_mul(m1 , rm , Nvar)==im_mul(lm , m0 , Nvar):
+                  assert(m1!=lm and rm!=m0) 
                   ret.append( (lm , p0 , 0 , 0 , p1 , rm) )
               rm = im_lpop(rm , Nvar)
            lm = im_rpop(lm , Nvar)
@@ -724,7 +727,7 @@ def dp_mora(_G):
             rem = im_div(tip(p) , tip(p2) , Nvar)
             if rem!=None:masks[n] = False
         B.sort(key=lambda x:x[1] , reverse=True)
-        print ("found {0}th basis (degree={1}) ({2} valid bases) ({3} obstructions killed) ({4} obstructions left)".format(len(G),ideg(tip(p2),Nvar),sum(masks),Nobs,len(B)))
+        print ("{0} obstruction killed (new basis deg={1}) nb={2} nab={3} rp={4}".format(Nobs,ideg(tip(p2),Nvar),sum(masks),len(G),len(B)))
     G = [p for (tf,p) in zip(masks,G) if tf]
     print("start reducing (total obstructions={0} , number of bases={1})".format(Nobs,len(G)))
     RG = []
