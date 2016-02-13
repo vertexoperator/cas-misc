@@ -668,6 +668,7 @@ def dp_mora(_G):
         return max(p.coeffs.keys())
     G = [q*Fraction(1,q.coeffs[tip(q)]) for q in _G if q!=0]
     B = []
+    #-- inter-reduction
     while True:
        ok = False
        for n,p in enumerate(G):
@@ -684,6 +685,7 @@ def dp_mora(_G):
     G = [p for p in G if p!=0]
     if len(G)==0:return []
     Nvar = G[0].Nvar
+    G.sort(key=lambda x:tdeg(x,Nvar))
     masks = [True]*len(G)
     sugars = [tdeg(p,Nvar) for p in G]
     print("{0} interreduced bases".format(len(G)))
@@ -944,5 +946,4 @@ def lv2_15():
 
 if __name__=="__main__":
    test_mora()
-
 

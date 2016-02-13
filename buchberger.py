@@ -448,6 +448,7 @@ def dp_buchberger(_G):
               break
        if ok:break
     G = [p for p in G if p!=0]
+    G.sort(key = lambda x:tdeg(x))
     sugars = [tdeg(p) for p in G]
     masks = [True]*len(G)
     if len(G)==0:return []
@@ -460,11 +461,13 @@ def dp_buchberger(_G):
               #-- Buchberger's product criterion to avoid unnecessary reduction
               if all([min(i1,i2)==0 for (i1,i2) in zip(mp,mq)]):continue
               mpq = tuple([max(i1,i2) for (i1,i2) in zip(mp,mq)])
-              if NoSugar:
-                  s_pq = 0
-              else:
-                  s_pq = max(sugars[i]+sum(mpq)-sum(mp) , sugars[j]+sum(mpq)-sum(mq))
-              B.append( (i , j , idiv(mpq,mp) , idiv(mpq,mq) , mpq , s_pq) )
+              #-- part of Gebauer-Moeller criterion
+              if any([(k<j) and idiv(mpq , g.tip)!=None for (k,g) in enumerate(G)]):
+                 if NoSugar:
+                    s_pq = 0
+                 else:
+                    s_pq = max(sugars[i]+sum(mpq)-sum(mp) , sugars[j]+sum(mpq)-sum(mq))
+                 B.append( (i , j , idiv(mpq,mp) , idiv(mpq,mq) , mpq , s_pq) )
     B.sort(key=lambda x:(x[5],x[4]) , reverse=True)
     while len(B)>0:
         i,j,um,vm,_,s_h = B.pop()
@@ -522,7 +525,7 @@ def dp_buchberger(_G):
         masks.append( True )
         sugars.append( s_h )
         B.sort(key=lambda x:(x[5],x[4]) , reverse=True)
-        print("{0} obstruction killed nb={1} nab={2} rp={3}".format(Nobs ,sum(masks), len(G) ,len(B)))
+        print("{0} obstruction removed nb={1} nab={2} rp={3} sugar={4}".format(Nobs ,sum(masks), len(G) ,len(B),s_h))
     #-- find reduced basis
     G = [p for (tf,p) in zip(masks,G) if tf] 
     RG = []
@@ -582,4 +585,16 @@ if __name__=="__main__":
          u0**2-u0*h+2*u3**2+2*u2**2+2*u1**2+2*u4**2]
     GB = groebner(I,[h,u0,u1,u2,u3,u4],grevlex(6))
     assert(len(GB)==13),"h-katsura-4 failed"
+    #-- cyclic-4 benchmark
+    c0,c1,c2,c3 = Variable("c0"),Variable("c1"),Variable("c2"),Variable("c3")
+    I = [c3*c2*c1*c0-1,((c2+c3)*c1+c3*c2)*c0+c3*c2*c1,(c1+c3)*c0+c2*c1+c3*c2,c0+c1+c2+c3]
+    GB = groebner(I , [c0,c1,c2,c3] , grevlex(4))
+    assert(len(GB)==7)
+    #-- cyclic-5 benchmark
+    c0,c1,c2,c3,c4 = Variable("c0"),Variable("c1"),Variable("c2"),Variable("c3"),Variable("c4")
+    I = [c4*c3*c2*c1*c0-1 , (((c3+c4)*c2+c4*c3)*c1+c4*c3*c2)*c0+c4*c3*c2*c1,
+         ((c2+c4)*c1+c4*c3)*c0+c3*c2*c1+c4*c3*c2,
+         (c1+c4)*c0+c2*c1+c3*c2+c4*c3, c0+c1+c2+c3+c4]
+    GB = groebner(I , [c0,c1,c2,c3,c4] , grevlex(5))
+    assert(len(GB)==20)
 
