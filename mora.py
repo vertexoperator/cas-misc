@@ -713,10 +713,10 @@ def dp_mora(_G):
         u1.coeffs[lm1] = 1
         v1.coeffs[rm1] = 1
         t0 = time.time()
-        p2 = dp_nf(u0*p0*v0 - u1*p1*v1 , [p for (tf,p) in zip(masks,G) if tf])
+        p2 = dp_nf(u0*p0*v0 - u1*p1*v1 , G)
         t1 = time.time()
         if t1-t0>5.0:
-           print("1 obstruction removed (time:{0:.3f}) ({1} obstructions left)".format(t1-t0 , len(B)))
+           print("1 obstruction removed (time:{0:.3f}) (rp={1})".format(t1-t0 , len(B)))
         if p2==0:continue
         p2 = p2*Fraction(1, p2.coeffs[tip(p2)])
         G.append(p2)
@@ -744,7 +744,7 @@ def dp_mora(_G):
             rem = im_div(tip(p) , tip(p2) , Nvar)
             if rem!=None:masks[n] = False
         B.sort(key=lambda x:(x[2],x[1]) , reverse=True)
-        print ("{0} obstruction removed (new basis deg={1}) nb={2} nab={3} rp={4} sugar={5}".format(Nobs,ideg(tip(p2),Nvar),sum(masks),len(G),len(B),s_h))
+        print ("{0} obstructions removed (new basis deg={1}) nb={2} nab={3} rp={4} sugar={5}".format(Nobs,ideg(tip(p2),Nvar),sum(masks),len(G),len(B),s_h))
     G = [p for (tf,p) in zip(masks,G) if tf]
     print("start reducing (total obstructions={0} , number of bases={1})\n".format(Nobs,len(G)))
     RG = []
@@ -940,10 +940,9 @@ def lp1_10():
 def lv2_15():
    x,y,z = Symbol("x"),Symbol("y"),Symbol("z")
    I = [x*y+y*z , x*x+x*x*y-y*x-y*y]
-   return mora(I , [z,y,x])
+   return mora(I , [x,y,z])
 
 
 
 if __name__=="__main__":
    test_mora()
-

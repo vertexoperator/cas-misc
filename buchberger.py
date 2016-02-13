@@ -7,7 +7,7 @@ except:
 from numbers import *
 from fractions import Fraction
 import copy
-
+import time
 
 class Monomial(object):
    def __init__(self):
@@ -163,6 +163,8 @@ class Polynomial(object):
                terms.append( str(c) )
            elif idx==0 and c==1:
                terms.append( str(m) )
+           elif idx==0 and c==-1:
+               terms.append( "-" + str(m) )
            elif idx==0:
                terms.append( "%s*%s" % (str(c),str(m)) )
            elif len(m.degs.keys())==0:
@@ -352,8 +354,8 @@ def p2dp(p , vars , weightMat):
 
 #-- graded reverse lexcographic order
 def grevlex(Nvar):
-    weightMat = [[0]*Nvar for _ in range(Nvar+1)]
-    for i in range(Nvar+1):
+    weightMat = [[0]*Nvar for _ in range(Nvar)]
+    for i in range(Nvar):
         for j in range(Nvar):
            if i==0:weightMat[i][j] = 1
            elif i+j==Nvar:weightMat[i][j] = -1
@@ -384,7 +386,7 @@ def dp_nf(p , G):
     h = copy.deepcopy(p)
     r = DPolynomial(h.Nvar , h.Nweight , h.weightMat)
     HMG = [(p.normalize() , p.tip) for p in G if p!=0]
-    if h==0:return 0
+    if h==0:return r
     while True:
         m = h.tip
         if h==0:break
@@ -425,54 +427,45 @@ def p_nf(p , G , vars , order):
     return dp2p(r,vars)
 
 
-import time
 def dp_buchberger(_G):
     NoSugar = False
     def tdeg(p):
         return max( [sum(m) for m in p.coeffs.keys()] )
     nf_time = 0.0
     Nobs,ZR,NZR = 0,0,0
+    NMP,NFP,NBP = 0,0,0
     G = [q*Fraction(1,q.coeffs[q.tip]) for q in _G if q!=0]
-    #-- inter-reduce
-    while True:
-       ok = False
-       for n,p in enumerate(G):
-          p2 = dp_nf(p , [q for q in G if q!=p and q!=0])
-          if p2==0:
-              G[n] *= 0
-          elif p2!=p:
-              G[n] = p2*Fraction(1 , p2.coeffs[p2.tip])
-              break
-          elif n==len(G)-1:
-              ok = True
-              break
-       if ok:break
-    G = [p for p in G if p!=0]
-    G.sort(key = lambda x:tdeg(x))
-    sugars = [tdeg(p) for p in G]
     masks = [True]*len(G)
-    if len(G)==0:return []
+    sugars = [tdeg(p) for p in G]
     #-- find first obstructions
     B = []
+    Z = set([])
     for i,p in enumerate(G):
        for j,q in enumerate(G):
            if i<j:
               mp , mq = p.tip , q.tip
-              #-- Buchberger's product criterion to avoid unnecessary reduction
-              if all([min(i1,i2)==0 for (i1,i2) in zip(mp,mq)]):continue
               mpq = tuple([max(i1,i2) for (i1,i2) in zip(mp,mq)])
-              #-- part of Gebauer-Moeller criterion
-              if any([(k<j) and idiv(mpq , g.tip)!=None for (k,g) in enumerate(G)]):
-                 if NoSugar:
-                    s_pq = 0
-                 else:
-                    s_pq = max(sugars[i]+sum(mpq)-sum(mp) , sugars[j]+sum(mpq)-sum(mq))
-                 B.append( (i , j , idiv(mpq,mp) , idiv(mpq,mq) , mpq , s_pq) )
+              if NoSugar:
+                 s_pq = 0
+              else:
+                 s_pq = max(sugars[i]+sum(mpq)-sum(mp) , sugars[j]+sum(mpq)-sum(mq))
+              B.append( (i , j , idiv(mpq,mp) , idiv(mpq,mq) , mpq , s_pq) )
+    for i,p in enumerate(G):
+        if any([idiv(p.tip,q.tip)!=None for (j,q) in enumerate(G) if j!=i]):
+            masks[i] = False
     B.sort(key=lambda x:(x[5],x[4]) , reverse=True)
     while len(B)>0:
-        i,j,um,vm,_,s_h = B.pop()
+        i0,j0,um,vm,cm_h,s_h = B.pop()
+        if iadd(um,vm)==cm_h:  #-- reduces to 0
+            Z.add( (i0,j0) )
+            continue
+        cands = [k for (k,p) in enumerate(G) if idiv(cm_h,p.tip)!=None]
+        if any([(i0,k) in Z and (k,j0) in Z for k in cands]):continue
+        if any([(k,i0) in Z and (k,j0) in Z for k in cands]):continue
+        if any([(k,i0) in Z and (j0,k) in Z for k in cands]):continue
+        if any([(i0,k) in Z and (j0,k) in Z for k in cands]):continue
         Nobs+=1
-        p,q = G[i],G[j]
+        p,q = G[i0],G[j0]
         tp = DPolynomial(p.Nvar , p.Nweight , p.weightMat)
         tq = DPolynomial(q.Nvar , q.Nweight , q.weightMat)
         tp.coeffs[um] = 1
@@ -482,15 +475,17 @@ def dp_buchberger(_G):
         tp.normalize()
         tq.normalize()
         t0 = time.time()
-        h = dp_nf(tp*p - tq*q , [t for (tf,t) in zip(masks,G) if tf])
+        h0 = tp*p - tq*q
+        h = dp_nf(h0 , G)
         t1 = time.time()
         nf_time += (t1-t0)
+        Z.add( (i0,j0) )
         if h==0:
             ZR+=1
             continue
         NZR+=1
         h = h*Fraction(1 , h.coeffs[h.tip])
-        #-- useless pair elimination of  Gebauer-Moeller
+        #-- Gebauer-Moeller criterion B
         RED = []
         htip = h.tip
         for obs in B:
@@ -500,40 +495,60 @@ def dp_buchberger(_G):
             ftip,gtip = G[i].tip,G[j].tip
             mfh = tuple([max(i1,i2) for (i1,i2) in zip(ftip,htip)])
             mgh = tuple([max(i1,i2) for (i1,i2) in zip(gtip,htip)])
+            #-- Gebauer-Moeller criterion B
             if mfh!=mfg and mgh!=mfg:
+                 NBP+=1
                  RED.append( obs )
-        for obs in RED:
-            B.remove(obs)
+        for c in RED:
+            B.remove( c )
         #-- new obstructions
         for i,p in enumerate(G):
             if not masks[i]:continue
-            mp , ms = p.tip , h.tip
-            mps = tuple([max(i1,i2) for (i1,i2) in zip(mp,ms)])
-            if iadd(mp,ms)==mps:continue
-            if any([obs[0]<i and obs[1]==len(G) and obs[4]==mps for obs in B]):
-                continue
-            if any([tf and idiv(mps , g.tip)!=None for (tf,g) in zip(masks,G)]):
-                if NoSugar:
-                   s_ps = 0
-                else:
-                   s_ps = max(sugars[i]+sum(mps)-sum(mp) , s_h+sum(mps)-sum(ms))
-                B.append( (i , len(G) , idiv(mps,mp) , idiv(mps,ms) , mps , s_ps) )
+            mp = p.tip
+            mps = tuple([max(i1,i2) for (i1,i2) in zip(mp,htip)])
+            if NoSugar:
+                s_ps = 0
+            else:
+                s_ps = max(sugars[i]+sum(mps)-sum(mp) , s_h+sum(mps)-sum(htip))
+            B.append( (i , len(G) , idiv(mps,mp) , idiv(mps,htip) , mps , s_ps) )
+        #-- Gebauer-Moeller criterion M
+        RED = set([])
+        hdset = set([])
+        for obs in B:
+            if obs[1]!=len(G):continue
+            for b in B:
+               if b[1]==obs[1] and b[4]!=obs[4] and idiv(obs[4],b[4])!=None:
+                   RED.add( obs )
+                   NMP += 1
+                   break
+            else:
+               hdset.add( obs[4] )
+        #-- Gebaur-Moeller criterion F
+        for hdlcm in hdset:
+            cands = [b for b in B if b[4]==hdlcm]
+            cands.sort(key=lambda x:(x[4],x[0]))
+            for b in cands[1:]:
+                if not b in RED:B.remove( b )
+                NFP+=1
+        for c in RED:
+            B.remove( c )
         for n,p in enumerate(G):
             rem = idiv(p.tip , h.tip)
             if rem!=None:masks[n] = False
         G.append( h )
         masks.append( True )
         sugars.append( s_h )
+        print("{0} obs: HT={1}{2}{3} nb={4} nab={5} rp={6} sugar={7} t={8:.3f}".format(Nobs ,h.tip , G[i0].tip,G[j0].tip, sum(masks), len(G) ,len(B),s_h,t1-t0))
         B.sort(key=lambda x:(x[5],x[4]) , reverse=True)
-        print("{0} obstruction removed nb={1} nab={2} rp={3} sugar={4}".format(Nobs ,sum(masks), len(G) ,len(B),s_h))
     #-- find reduced basis
+    print("start reducing (number of minimal bases={0})".format(sum(masks)))
     G = [p for (tf,p) in zip(masks,G) if tf] 
     RG = []
     for n,p in enumerate(G):
         p = dp_nf(p,RG+G[n+1:])
         if p!=0:RG.append( p*Fraction(1,p.coeffs[p.tip]) )
+    print("total obstructions={0} , NF time={1:.3f} NMP={2} NFP={3} NBP={4} ZR={5} NZR={6}\n".format(Nobs,nf_time,NMP,NFP,NBP,ZR,NZR))
     assert(len(G)==len(RG)),"G should be minimal bases"
-    print("total obstructions={0} , NF time={1:.3f} ZR={2} NZR={3}\n".format(Nobs,nf_time,ZR,NZR))
     return RG
 
 
@@ -552,6 +567,7 @@ def eqset(X , Y):
    for y in Y:
       if not any([x==y for x in X]):return False
    return True
+
 
 
 if __name__=="__main__":
@@ -589,12 +605,29 @@ if __name__=="__main__":
     c0,c1,c2,c3 = Variable("c0"),Variable("c1"),Variable("c2"),Variable("c3")
     I = [c3*c2*c1*c0-1,((c2+c3)*c1+c3*c2)*c0+c3*c2*c1,(c1+c3)*c0+c2*c1+c3*c2,c0+c1+c2+c3]
     GB = groebner(I , [c0,c1,c2,c3] , grevlex(4))
-    assert(len(GB)==7)
+    assert(len(GB)==7),"cyclic-4 failed"
     #-- cyclic-5 benchmark
     c0,c1,c2,c3,c4 = Variable("c0"),Variable("c1"),Variable("c2"),Variable("c3"),Variable("c4")
     I = [c4*c3*c2*c1*c0-1 , (((c3+c4)*c2+c4*c3)*c1+c4*c3*c2)*c0+c4*c3*c2*c1,
          ((c2+c4)*c1+c4*c3)*c0+c3*c2*c1+c4*c3*c2,
          (c1+c4)*c0+c2*c1+c3*c2+c4*c3, c0+c1+c2+c3+c4]
+    t0 = time.time()
     GB = groebner(I , [c0,c1,c2,c3,c4] , grevlex(5))
-    assert(len(GB)==20)
-
+    t1 = time.time()
+    assert(len(GB)==20),"cyclic-5 failed"
+    print("cyclic-5:{0:.3f}(sec)\n".format(t1-t0))
+    #-- cyclic-6 benchmark(currently too slow)
+    """
+    c0,c1,c2,c3,c4,c5 = Variable("c0"),Variable("c1"),Variable("c2"),Variable("c3"),Variable("c4"),Variable("c5")
+    I = [c5*c4*c3*c2*c1*c0-1,
+         ((((c4+c5)*c3+c5*c4)*c2+c5*c4*c3)*c1+c5*c4*c3*c2)*c0+c5*c4*c3*c2*c1,
+         (((c3+c5)*c2+c5*c4)*c1+c5*c4*c3)*c0+c4*c3*c2*c1+c5*c4*c3*c2,
+         ((c2+c5)*c1+c5*c4)*c0+c3*c2*c1+c4*c3*c2+c5*c4*c3,
+         (c1+c5)*c0+c2*c1+c3*c2+c4*c3+c5*c4,
+         c0+c1+c2+c3+c4+c5]
+    t0 = time.time()
+    GB = groebner(I , [c0,c1,c2,c3,c4,c5] , grevlex(6))
+    t1 = time.time()
+    print("cyclic-6:{0:.3f}(sec)\n".format(t1-t0))
+    assert(len(GB)==45)
+    """
