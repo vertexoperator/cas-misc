@@ -661,6 +661,9 @@ def dp_obs(p0 , p1):
 
 import time
 def dp_mora(_G):
+    NoSugar = False
+    def tdeg(p,Nvar):
+        return max([ideg(m,Nvar) for m in p.coeffs.keys()])
     def tip(p):
         return max(p.coeffs.keys())
     G = [q*Fraction(1,q.coeffs[tip(q)]) for q in _G if q!=0]
@@ -679,20 +682,26 @@ def dp_mora(_G):
               break
        if ok:break
     G = [p for p in G if p!=0]
-    masks = [True]*len(G)
     if len(G)==0:return []
     Nvar = G[0].Nvar
+    masks = [True]*len(G)
+    sugars = [tdeg(p,Nvar) for p in G]
     print("{0} interreduced bases".format(len(G)))
     for i,p in enumerate(G):
         for j,q in enumerate(G):
             if i<=j:
                for c in dp_obs(p,q):
                    cm = im_mul(c[0] , im_mul(tip(c[1]) , c[2] , Nvar) , Nvar)
-                   B.append( (c,cm) )
-    B.sort(key=lambda x:x[1] , reverse=True)
+                   if NoSugar:
+                       s_obs = 0
+                   else:
+                       s_obs = max(tdeg(p,Nvar)+ideg(c[0],Nvar)+ideg(c[2],Nvar),
+                                   tdeg(q,Nvar)+ideg(c[3],Nvar)+ideg(c[5],Nvar))
+                   B.append( (c,cm,s_obs) )
+    B.sort(key=lambda x:(x[2],x[1]) , reverse=True)
     Nobs = 0
     while len(B)>0:
-        (lm0,p0,rm0,lm1,p1,rm1),_ = B.pop()
+        (lm0,p0,rm0,lm1,p1,rm1),_,s_h = B.pop()
         Nobs+=1
         assert(len([x for x in [lm0,rm0,lm1,rm1] if x==0])>=2)
         u0,v0 = DExpression(Nvar),DExpression(Nvar)
@@ -705,37 +714,42 @@ def dp_mora(_G):
         p2 = dp_nf(u0*p0*v0 - u1*p1*v1 , [p for (tf,p) in zip(masks,G) if tf])
         t1 = time.time()
         if t1-t0>5.0:
-           print("1 obstruction killed (time:{0:.3f}) ({1} obstructions left)".format(t1-t0 , len(B)))
+           print("1 obstruction removed (time:{0:.3f}) ({1} obstructions left)".format(t1-t0 , len(B)))
         if p2==0:continue
         p2 = p2*Fraction(1, p2.coeffs[tip(p2)])
         G.append(p2)
         masks.append( True )
+        sugars.append( s_h )
         m2 = tip(p2)
         RED = []
-        for (c,cm) in B:
+        for (c,cm,s) in B:
             cm = im_mul(c[0],im_mul(tip(c[1]) , c[2] ,Nvar),Nvar)
             rem = im_div(cm , m2 , Nvar)
-            if rem!=None and rem[0]!=0 and rem[1]!=0:RED.append( (c,cm) )
+            if rem!=None and rem[0]!=0 and rem[1]!=0:RED.append( (c,cm,s) )
         for c in RED:
             B.remove( c )
-        for (tf,p) in zip(masks,G):
+        for i,(tf,p) in enumerate(zip(masks,G)):
             if not tf:continue
             for c in dp_obs(p,p2):
                 cm = im_mul(c[0] , im_mul(tip(c[1]) , c[2] , Nvar) , Nvar)
-                B.append( (c,cm) )
+                if NoSugar:
+                   s_ps = 0
+                else:
+                   s_ps = max(sugars[i]+ideg(c[0],Nvar)+ideg(c[2],Nvar),
+                              s_h+ideg(c[3],Nvar)+ideg(c[5],Nvar))
+                B.append( (c,cm,s_ps) )
         for n,p in enumerate(G[:-1]):
             rem = im_div(tip(p) , tip(p2) , Nvar)
             if rem!=None:masks[n] = False
-        B.sort(key=lambda x:x[1] , reverse=True)
-        print ("{0} obstruction killed (new basis deg={1}) nb={2} nab={3} rp={4}".format(Nobs,ideg(tip(p2),Nvar),sum(masks),len(G),len(B)))
+        B.sort(key=lambda x:(x[2],x[1]) , reverse=True)
+        print ("{0} obstruction removed (new basis deg={1}) nb={2} nab={3} rp={4} sugar={5}".format(Nobs,ideg(tip(p2),Nvar),sum(masks),len(G),len(B),s_h))
     G = [p for (tf,p) in zip(masks,G) if tf]
-    print("start reducing (total obstructions={0} , number of bases={1})".format(Nobs,len(G)))
+    print("start reducing (total obstructions={0} , number of bases={1})\n".format(Nobs,len(G)))
     RG = []
     for n,p in enumerate(G):
         p = dp_nf(p,RG+G[n+1:])
         if p!=0:RG.append( p*Fraction(1,p.coeffs[tip(p)]) )
     assert(sum(masks)==len(RG)),"No of minimal bases!=No of reduced bases?"
-    print("number of reduced bases={0}\n".format(len(RG)))
     return RG
 
 
@@ -923,11 +937,12 @@ def lp1_10():
 
 def lv2_15():
    x,y,z = Symbol("x"),Symbol("y"),Symbol("z")
-   ideal = [x*y+y*z , x*x+x*x*y-y*x-y*y]
-   return mora(ideal , [z,y,x])
+   I = [x*y+y*z , x*x+x*x*y-y*x-y*y]
+   return mora(I , [z,y,x])
 
 
 
 if __name__=="__main__":
    test_mora()
+
 
