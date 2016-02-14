@@ -943,7 +943,15 @@ def test_mora():
 
 
 def test_gs():
-    #-- sl_3 and its irrep with L(1,1)
+    #-- sl_3 and its irrep L(1,0)
+    #-- Note: The basis of this irrep can be {1,f1,f2*f1}
+    f1,f2 = Symbol("f1"),Symbol("f2")
+    S0 = [f2*f2*f1-2*f2*f1*f2+f1*f2*f2 , f2*f1*f1-2*f1*f2*f1+f1*f1*f2]
+    T0 = [f1*f1,f2]   #-- vanishing of singular vectors
+    S,T = gs(S0,T0,[f1,f2])
+    assert( eqset(S , S0) )
+    assert( eqset(T , [f1**2 , f2 , f1*f2*f1]) )
+    #-- sl_3 and its irrep L(1,1)
     f1,f2 = Symbol("f1"),Symbol("f2")
     S0 = [f2*f2*f1-2*f2*f1*f2+f1*f2*f2 , f2*f1*f1-2*f1*f2*f1+f1*f1*f2]
     T0 = [f1*f1,f2*f2]   #-- vanishing of singular vectors
