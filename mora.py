@@ -773,29 +773,33 @@ def p_nf(p , G , vars):
 S : Groebner bases for two-sided ideal
 T : "S-compatible" Groebner bases for left ideal
 """
-def gs_red(p , S , T , vars):
+def gs_nf(p , S , T , vars):
     def tip(p):
         im = max(p2dp(p , vars).coeffs.keys())
         return i2m(im,vars)
     if p==0:return p
     p0 = p_nf(p , S , vars)
+    if p0==0:return p0
     G = [p for p in T if p!=0]
     for p in G:p.simplify()
+    r = Expression()
     HMG = [tip(p) for p in G]
     while True:
        if p0==0:break
        m = tip(p0)
        for (p1,m1) in zip(G,HMG):
-           for (m0,c0) in p0.coeffs.items():
-               if m0.deg()<m1.deg():continue
-               if m0.varlist[-m1.deg():]==m1.varlist:
-                   u = MonomialExpression()
-                   u.varlist = m0.varlist[:-m1.deg()]
-                   c0,c1 = p0.coeffs[m0],p1.coeffs[m1]
-                   p0 = (c1*p0 - c0*Expression(u)*p1)/c1
-                   break
-       if m==tip(p0):break
-    return p0
+           if m.deg()<m1.deg():continue
+           if m.varlist[-m1.deg():]==m1.varlist:
+               u = MonomialExpression()
+               u.varlist = m.varlist[:-m1.deg()]
+               c0,c1 = p0.coeffs[m],p1.coeffs[m1]
+               p0 = (c1*p0 - c0*Expression(u)*p1)*Fraction(1,c1)
+               p0 = p_nf(p0 , S , vars)
+               break
+       else:
+           r += Expression(m)*p0.coeffs[m]
+           del p0.coeffs[m]
+    return r
 
 
 def right_justified_completion(S , T , vars):
@@ -817,15 +821,68 @@ def right_justified_completion(S , T , vars):
                 if m0.varlist[-m1.deg():]==m1.varlist:
                     u = MonomialExpression()
                     u.varlist = m0.varlist[:-m1.deg()]
-                    p2 = p_nf(p0 - Expression(u)*p1 , S , vars)
+                    h = p0 - Expression(u)*p1*Fraction(p0.coeffs[tip(p0)] , p1.coeffs[tip(p1)])
+                    p2 = gs_nf(h , S , G0 , vars)
                     if p2!=0:
                         m2 = tip(p2)
                         p2 = p2*Fraction(1,p2.coeffs[m2])
                         G1.append( (p2,m2) )
         if len(G1)==0:
-           return [p_nf(p,S,vars) for (p,_) in G]
+            RG = []
+            G0 = [p for (p,_) in G]
+            for n,p in enumerate(G0):
+                p = gs_nf(p, S , RG+G0[n+1:],vars)
+                if p!=0:RG.append( p*Fraction(1,p.coeffs[tip(p)]) )
+            return RG
         else:
            G.extend(G1)
+
+
+"""
+Groebner-Shirshov pairs for (_S,_T)
+
+"""
+def gs(_S , _T , vars):
+    def tip(p):
+        im = max(p2dp(p , vars).coeffs.keys())
+        return i2m(im,vars)
+    S = mora(_S , vars)
+    T = right_justified_completion(S , _T , vars)
+    while True:
+        B = []
+        T1 = []
+        for p in S:
+            for q in T:
+                B.extend( dp_obs(p2dp(p,vars) , p2dp(q,vars)) )
+        for (ilm0,dp0,irm0,ilm1,dq1,irm1) in  B:
+            """
+               obstruction pairs for $(p,q) \in (S,T)$ should be the following forms:
+               (1) p - bq
+               (2) pa - bq
+               (3) apb - q
+            """
+            if irm1!=0:continue
+            lm0,rm0 = i2m(ilm0,vars),i2m(irm0,vars)
+            lm1,rm1 = i2m(ilm1,vars),i2m(irm1,vars)
+            h_l = Expression(lm0)*dp2p(dp0,vars)*Expression(rm0)
+            h_r = Expression(lm1)*dp2p(dq1,vars)*Expression(rm1)
+            assert(tip(h_l)==tip(h_r))
+            c0,c1 = h_l.coeffs[tip(h_l)] , h_r.coeffs[tip(h_r)]
+            h = gs_nf(h_l-h_r*Fraction(c0,c1) , S , T , vars)
+            if h!=0:T1.append( h*Fraction(1 , h.coeffs[tip(h)]) )
+        if len(T1)==0:
+            break
+        else:
+            T2 = []
+            for n,p in enumerate(T1):
+                h = gs_nf(p , S , T+T2+T1[n+1:] , vars)
+                if h!=0:
+                    T2.append( h*Fraction(1 , h.coeffs[tip(h)]) )
+            if len(T2)==0:break
+            T.extend( T2 )
+            T = right_justified_completion(S , T , vars)
+    return (S,T)
+
 
 
 def eqset(X , Y):
@@ -883,6 +940,16 @@ def test_mora():
    #-- example from B.J. Keller's "Algorithms and Orders for Finding Noncommutative Groebner Bases"
    GB = [x*y*z*y-w , y*z*y*w , x*y*w*y - z , y*w*y*z , z*z , w*w , w*z*y*w , z*w*y*z]
    assert( eqset(mora([x*y*z*y-w , y*z*y*w , x*y*w*y-z,y*w*y*z],[x,y,z,w]) , GB) )
+
+
+def test_gs():
+    #-- sl_3 and its irrep with L(1,1)
+    f1,f2 = Symbol("f1"),Symbol("f2")
+    S0 = [f2*f2*f1-2*f2*f1*f2+f1*f2*f2 , f2*f1*f1-2*f1*f2*f1+f1*f1*f2]
+    T0 = [f1*f1,f2*f2]   #-- vanishing of singular vectors
+    S,T = gs(S0,T0,[f1,f2])
+    assert( eqset(S , S0) )
+    assert( eqset(T , [f1**2, f2**2, (f1**3)*f2, -Fraction(1,2)*(f1**2)*f2 + f1*f2*f1, f2*f1*f2*f1*f2, f1**2*f2*f1*f2]) )
 
 
 
@@ -946,3 +1013,5 @@ def lv2_15():
 
 if __name__=="__main__":
    test_mora()
+   test_gs()
+
