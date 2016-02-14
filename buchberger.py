@@ -382,39 +382,44 @@ def deglex(Nvar):
 
 
 def dp_nf(p , G):
+    def tdeg(p):
+        return max([sum(m) for m in p.coeffs.keys()])
     Nweight = p.Nweight
     h = copy.deepcopy(p)
     r = DPolynomial(h.Nvar , h.Nweight , h.weightMat)
-    HMG = [(p.normalize() , p.tip) for p in G if p!=0]
+    HMG = [(p.normalize() , p.tip , tdeg(p)) for p in G if p!=0]
     if h==0:return r
     while True:
         m = h.tip
-        if h==0:break
+        if len(h.coeffs)==0:break
         c_h = h.coeffs[m]
-        if sum(m)==0:
-            r.coeffs[m] = c_h
-            break
         if c_h==0:
             del h.coeffs[m]
             continue
-        w_h = h.weights[m]
-        for (p1,m1) in HMG:
+        deg_m = sum(m)
+        if deg_m==0:
+            r.coeffs[m] = c_h
+            break
+        for (p1,m1,tdeg1) in HMG:
+            if tdeg1>deg_m:continue
             rem = idiv(m,m1)
-            if rem!=None:
-                w_rem = isub(w_h , p1.weights[m1])
-                c1 = p1.coeffs[m1]
-                for (m2,c2) in p1.coeffs.items():
-                    m3 = iadd(rem , m2)
-                    if not m3 in h.weights:
-                        h.weights[m3] = iadd(p1.weights[m2] , w_rem)
-                    h.coeffs[m3] = h.coeffs.get(m3,0) - Fraction(c2*c_h,c1)
-                    if h.coeffs[m3]==0:
-                        del h.coeffs[m3]
-                        del h.weights[m3]
-                break
+            if rem==None:continue
+            w_rem = isub(h.weights[m] , p1.weights[m1])
+            c1 = p1.coeffs[m1]
+            for (m2,c2) in p1.coeffs.items():
+                 m3 = iadd(rem , m2)
+                 if not m3 in h.weights:
+                     h.weights[m3] = iadd(p1.weights[m2] , w_rem)
+                     h.coeffs[m3] = -Fraction(c2*c_h,c1)
+                 else:
+                     h.coeffs[m3] = h.coeffs[m3] - Fraction(c2*c_h,c1)
+                     if h.coeffs[m3]==0:
+                         del h.coeffs[m3]
+                         del h.weights[m3]
+            break
         else:
             del h.coeffs[m]
-            r.weights[m] = w_h
+            r.weights[m] = h.weights[m]
             del h.weights[m]
             r.coeffs[m] = c_h
     return r
@@ -454,6 +459,7 @@ def dp_buchberger(_G):
         if any([idiv(p.tip,q.tip)!=None for (j,q) in enumerate(G) if j!=i]):
             masks[i] = False
     B.sort(key=lambda x:(x[5],x[4]) , reverse=True)
+    prev_sugar = None
     while len(B)>0:
         i0,j0,um,vm,cm_h,s_h = B.pop()
         if iadd(um,vm)==cm_h:  #-- reduces to 0
@@ -476,12 +482,13 @@ def dp_buchberger(_G):
         tq.normalize()
         t0 = time.time()
         h0 = tp*p - tq*q
-        h = dp_nf(h0 , G)
+        h = dp_nf(h0 , [ct for ct in G if ct!=0])
         t1 = time.time()
         nf_time += (t1-t0)
         Z.add( (i0,j0) )
         if h==0:
             ZR+=1
+            prev_sugar = s_h
             continue
         NZR+=1
         h = h*Fraction(1 , h.coeffs[h.tip])
@@ -534,11 +541,16 @@ def dp_buchberger(_G):
             B.remove( c )
         for n,p in enumerate(G):
             rem = idiv(p.tip , h.tip)
-            if rem!=None:masks[n] = False
+            if rem!=None:
+               masks[n] = False
+            if prev_sugar!=s_h and not masks[n]:
+               px = dp_nf(p , [qx for qx in G if qx!=0 and qx!=p])
+               if px==0:G[n] = px
+        prev_sugar = s_h
         G.append( h )
         masks.append( True )
         sugars.append( s_h )
-        print("{0} obs: HT={1}{2}{3} nb={4} nab={5} rp={6} sugar={7} t={8:.3f}".format(Nobs ,h.tip , G[i0].tip,G[j0].tip, sum(masks), len(G) ,len(B),s_h,t1-t0))
+        print("{0} obs: HT={1}{2}{3} nb={4} nab={5} rp={6} sugar={7} t={8:.3f}".format(Nobs ,h.tip , G[i0].tip,G[j0].tip, sum(masks), len([px for px in G if px!=0]) ,len(B),s_h,t1-t0))
         B.sort(key=lambda x:(x[5],x[4]) , reverse=True)
     #-- find reduced basis
     print("start reducing (number of minimal bases={0})".format(sum(masks)))
@@ -617,7 +629,6 @@ if __name__=="__main__":
     assert(len(GB)==20),"cyclic-5 failed"
     print("cyclic-5:{0:.3f}(sec)\n".format(t1-t0))
     #-- cyclic-6 benchmark(currently too slow)
-    """
     c0,c1,c2,c3,c4,c5 = Variable("c0"),Variable("c1"),Variable("c2"),Variable("c3"),Variable("c4"),Variable("c5")
     I = [c5*c4*c3*c2*c1*c0-1,
          ((((c4+c5)*c3+c5*c4)*c2+c5*c4*c3)*c1+c5*c4*c3*c2)*c0+c5*c4*c3*c2*c1,
@@ -630,4 +641,4 @@ if __name__=="__main__":
     t1 = time.time()
     print("cyclic-6:{0:.3f}(sec)\n".format(t1-t0))
     assert(len(GB)==45)
-    """
+
