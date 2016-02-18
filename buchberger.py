@@ -9,6 +9,11 @@ from fractions import Fraction
 import copy
 import time
 
+try:
+    import cgb
+except:
+    cgb = None
+
 class Monomial(object):
    def __init__(self):
       self.degs = {}
@@ -231,7 +236,7 @@ class DPolynomial:
    def normalize(self):
        if self._normalized:return self
        zero_keys = []
-       for m,c in self.coeffs.items():
+       for (m,c) in self.coeffs.items():
            if c==0:
                zero_keys.append( m )
            elif not m in self.weights:
@@ -380,8 +385,15 @@ def deglex(Nvar):
            elif i==j:weightMat[i][j] = 1
     return weightMat
 
-
+import gc
 def dp_nf(p , G):
+    if cgb!=None:
+       h = copy.deepcopy(p)
+       r_coeffs,r_weights = cgb.cx_dp_nf(h , G)
+       r = DPolynomial(p.Nvar , p.Nweight , p.weightMat)
+       r.coeffs = r_coeffs
+       r.weights = r_weights
+       return r
     def tdeg(p):
         return max([sum(m) for m in p.coeffs.keys()])
     Nweight = p.Nweight
@@ -399,6 +411,7 @@ def dp_nf(p , G):
         deg_m = sum(m)
         if deg_m==0:
             r.coeffs[m] = c_h
+            r.weights[m] = h.weights[m]
             break
         for (p1,m1,tdeg1) in HMG:
             if tdeg1>deg_m:continue
@@ -641,4 +654,5 @@ if __name__=="__main__":
     t1 = time.time()
     print("cyclic-6:{0:.3f}(sec)\n".format(t1-t0))
     assert(len(GB)==45)
+
 
