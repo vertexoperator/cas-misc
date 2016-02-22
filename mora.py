@@ -7,10 +7,26 @@ except:
 
 from numbers import *
 from itertools import takewhile
-from fractions import Fraction
+from fractions import Fraction,gcd
 import copy
 import math
 from functools import reduce
+
+
+try:
+   from gmpy2 import mpz,mpq
+except:
+   s = """
+   Warning: gmpy2 not found.
+   To install gmpy2, for e.g.
+
+   sudo apt-get install libgmp-dev libmpfr-dev libmpc-dev
+   sudo pip install gmpy2
+   """
+   print(s)
+   mpz = int
+   mpq = lambda x,y:Fraction(x,y)
+
 
 
 
@@ -315,15 +331,6 @@ def im_mul(n , m , Nvar):
 
 
 
-
-def memoize(f):
-   cache = {}
-   def __fun__(*x):
-     if not x in cache:cache[x] = f(*x)
-     return cache[x]
-   return __fun__
-
-
 def im_lpop(n , Nvar):
    if n<=Nvar:return 0
    if Nvar==1:return (n-1)
@@ -370,7 +377,7 @@ class DExpression(object):
             assert(lhs.Nvar==rhs.Nvar)
             for (m,c) in rhs.coeffs.items():
                 ret.coeffs[m] = ret.coeffs.get(m,0)+c
-        elif isinstance(rhs,Number):
+        elif isinstance(rhs,(Number,type(mpz(0)),type(mpq(0,1)))):
             ret.coeffs[0] += rhs
             ret._simplified = lhs._simplified
         return ret.simplify()
@@ -386,7 +393,7 @@ class DExpression(object):
             assert(lhs.Nvar==rhs.Nvar)
             for (m,c) in rhs.coeffs.items():
                 ret.coeffs[m] = ret.coeffs.get(m,0)-c
-        elif isinstance(rhs,Number):
+        elif isinstance(rhs,(Number,type(mpz(0)),type(mpq(0,1)))):
             ret.coeffs[0] -= rhs
             ret._simplified = lhs._simplified
         return ret.simplify()
@@ -406,29 +413,29 @@ class DExpression(object):
                    c3 = c1*c2
                    m3 = im_mul(m1 , m2 , ret.Nvar)
                    ret.coeffs[m3] = ret.coeffs.get(m3,0)+c3
-        elif isinstance(rhs,Number):
+        elif isinstance(rhs,(Number,type(mpz(0)),type(mpq(0,1)))):
             for m1 in lhs.coeffs.keys():
                 ret.coeffs[m1] = lhs.coeffs[m1]*rhs
         return ret.simplify()
     def __div__(lhs,rhs):
-        if isinstance(rhs,Number):
+        if isinstance(rhs,(Number,type(mpz(0)),type(mpq(0,1)))):
            return lhs*Fraction(1,rhs)
         else:
            assert(False),("invalid division {0}/{1}".format(str(lhs),str(rhs)))
     def __rmul__(rhs,lhs):
         if isinstance(lhs,DExpression):
             return (lhs*rhs)
-        elif isinstance(lhs,Number):
+        elif isinstance(lhs,(Number,type(mpz(0)),type(mpq(0,1)))):
             return (rhs*lhs)
     def __radd__(rhs,lhs):
         if isinstance(lhs,DExpression):
             return (lhs+rhs)
-        elif isinstance(lhs,Number):
+        elif isinstance(lhs,(Number,type(mpz(0)),type(mpq(0,1)))):
             return (rhs+lhs)
     def __rsub__(rhs,lhs):
         if isinstance(lhs,DExpression):
             return (lhs-rhs)
-        elif isinstance(lhs,Number):
+        elif isinstance(lhs,(Number,type(mpz(0)),type(mpq(0,1)))):
             return (-rhs+lhs)
     def __eq__(lhs,rhs):
         if isinstance(rhs,DExpression):
@@ -438,7 +445,7 @@ class DExpression(object):
             for (m,c) in lhs.coeffs.items():
                 if not m in rhs.coeffs or rhs.coeffs[m]!=c:return False
             return True
-        elif isinstance(rhs,Number):
+        elif isinstance(rhs,(Number,type(mpz(0)),type(mpq(0,1)))):
             return (list(lhs.coeffs.keys())==[0] and lhs.coeffs[0]==rhs)
         else:
             return False
@@ -565,17 +572,26 @@ def im_div_with_deg(m0 , m1 , Nvar):
     return None
 
 
+def nc_p2zp(p):
+    def lcm(a,b):
+        return (a*b)//gcd(a,b)
+    if len(p.coeffs)==0:return (p,1)
+    c0 = reduce(lcm , [x.denominator for x in p.coeffs.values()])
+    h = copy.deepcopy(p)
+    h.coeffs = dict([(k,mpz(c0*v)) for (k,v) in h.coeffs.items()])
+    return (h,c0)
+
+
 import time
-def dp_nf(p , _G):
+def dnc_nf(p , _G):
     def tip(p):
        return max(p.coeffs.keys())
     if len(p.coeffs)==1:return p
-    h = copy.deepcopy(p)
-    h.simplify()
+    h,cx = nc_p2zp(p)
     r = DExpression(p.Nvar)
     Nvar = p.Nvar
     G = [p.simplify() for p in _G if p!=0]
-    HMG = [(p*Fraction(1,p.coeffs[tip(p)]) , tip(p)) for p in G]
+    HMG = [(p*mpq(1,p.coeffs[tip(p)]) , tip(p)) for p in G]
     while True:
        m = tip(h)
        if m==0:
@@ -611,6 +627,7 @@ def dp_nf(p , _G):
        else:
            del h.coeffs[m]
            r.coeffs[m] = c0
+    r.coeffs = dict([(k,Fraction(int(v.numerator),cx*int(v.denominator))) for (k,v) in r.coeffs.items()])
     return r
 
 
@@ -672,7 +689,7 @@ def dp_mora(_G):
     while True:
        ok = False
        for n,p in enumerate(G):
-          p2 = dp_nf(p , [q for q in G if q!=p and q!=0])
+          p2 = dnc_nf(p , [q for q in G if q!=p and q!=0])
           if p2==0:
               G[n] *= 0
           elif p2!=p:
@@ -713,7 +730,7 @@ def dp_mora(_G):
         u1.coeffs[lm1] = 1
         v1.coeffs[rm1] = 1
         t0 = time.time()
-        p2 = dp_nf(u0*p0*v0 - u1*p1*v1 , G)
+        p2 = dnc_nf(u0*p0*v0 - u1*p1*v1 , G)
         t1 = time.time()
         if t1-t0>5.0:
            print("1 obstruction removed (time:{0:.3f}) (rp={1})".format(t1-t0 , len(B)))
@@ -749,7 +766,7 @@ def dp_mora(_G):
     print("start reducing (total obstructions={0} , number of bases={1})\n".format(Nobs,len(G)))
     RG = []
     for n,p in enumerate(G):
-        p = dp_nf(p,RG+G[n+1:])
+        p = dnc_nf(p,RG+G[n+1:])
         if p!=0:RG.append( p*Fraction(1,p.coeffs[tip(p)]) )
     assert(sum(masks)==len(RG)),"No of minimal bases!=No of reduced bases?"
     return RG
@@ -763,8 +780,8 @@ def mora(G , varlist):
     return [dp2p(p,varlist) for p in G2]
 
 
-def p_nf(p , G , vars):
-    r = dp_nf(p2dp(p , vars) , [p2dp(q,vars) for q in G])
+def nc_nf(p , G , vars):
+    r = dnc_nf(p2dp(p , vars) , [p2dp(q,vars) for q in G])
     return dp2p(r,vars)
 
 
@@ -778,7 +795,7 @@ def gs_nf(p , S , T , vars):
         im = max(p2dp(p , vars).coeffs.keys())
         return i2m(im,vars)
     if p==0:return p
-    p0 = p_nf(p , S , vars)
+    p0 = nc_nf(p , S , vars)
     if p0==0:return p0
     G = [p for p in T if p!=0]
     for p in G:p.simplify()
@@ -794,7 +811,7 @@ def gs_nf(p , S , T , vars):
                u.varlist = m.varlist[:-m1.deg()]
                c0,c1 = p0.coeffs[m],p1.coeffs[m1]
                p0 = (c1*p0 - c0*Expression(u)*p1)*Fraction(1,c1)
-               p0 = p_nf(p0 , S , vars)
+               p0 = nc_nf(p0 , S , vars)
                break
        else:
            r += Expression(m)*p0.coeffs[m]

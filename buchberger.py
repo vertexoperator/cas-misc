@@ -5,9 +5,25 @@ except:
   import pickle
 
 from numbers import *
-from fractions import Fraction
+from fractions import Fraction,gcd
+from functools import reduce
 import copy
 import time
+
+try:
+   from gmpy2 import mpz,mpq
+except:
+   s = """
+   Warning: gmpy2 not found.
+   To install gmpy2, for e.g.
+
+   sudo apt-get install libgmp-dev libmpfr-dev libmpc-dev
+   sudo pip install gmpy2
+   """
+   print(s)
+   mpz = int
+   mpq = lambda x,y:Fraction(x,y)
+
 
 try:
     import cgb
@@ -263,7 +279,7 @@ class DPolynomial:
    def __add__(lhs , rhs):
        ret = copy.deepcopy(lhs)
        ret._normalized = False
-       if isinstance(rhs,Number):
+       if isinstance(rhs,(Number,type(mpz(0)),type(mpq(0,1)))):
            m = tuple([0]*lhs.Nvar)
            ret.coeffs[m] = ret.coeffs.get(m,0)+rhs
            ret.weights[m] = tuple([0]*lhs.Nweight)
@@ -278,7 +294,7 @@ class DPolynomial:
            ret.coeffs[m] = -c
        return ret.normalize()
    def __mul__(lhs,rhs):
-       if isinstance(rhs,Number):
+       if isinstance(rhs,(Number,type(mpz(0)),type(mpq(0,1)))):
            if rhs==0:return DPolynomial(lhs.Nvar , lhs.Nweight , lhs.weightMat)
            ret = copy.deepcopy(lhs)
            ret._normalized = False
@@ -297,7 +313,7 @@ class DPolynomial:
    def __sub__(lhs,rhs):
        ret = copy.deepcopy(lhs)
        ret._normalized = False
-       if isinstance(rhs,Number):
+       if isinstance(rhs,(Number,type(mpz(0)),type(mpq(0,1)))):
            m = tuple([0]*lhs.Nvar)
            ret.coeffs[m] = ret.coeffs.get(m,0)-rhs
            ret.weights[m] = tuple([0]*lhs.Nweight)
@@ -315,7 +331,7 @@ class DPolynomial:
            for m,c in lhs.coeffs.items():
                if c!=rhs.coeffs.get(m,0):return False
            return True
-       elif isinstance(rhs,Number):
+       elif isinstance(rhs,(Number,type(mpz(0)),type(mpq(0,1)))):
            if len(lhs.coeffs)>1:
                return False
            if len(lhs.coeffs)==0:return (rhs==0)
@@ -385,19 +401,30 @@ def deglex(Nvar):
            elif i==j:weightMat[i][j] = 1
     return weightMat
 
+
+def p2zp(p):
+    def lcm(a,b):
+        return (a*b)//gcd(a,b)
+    if len(p.coeffs)==0:return (p,1)
+    c0 = reduce(lcm , [x.denominator for x in p.coeffs.values()])
+    h = copy.deepcopy(p)
+    h.coeffs = dict([(k,mpz(c0*v)) for (k,v) in h.coeffs.items()])
+    return (h,c0)
+
+
 import gc
 def dp_nf(p , G):
+    h,c0 = p2zp(p)
     if cgb!=None:
-       h = copy.deepcopy(p)
        r_coeffs,r_weights = cgb.cx_dp_nf(h , G)
        r = DPolynomial(p.Nvar , p.Nweight , p.weightMat)
        r.coeffs = r_coeffs
        r.weights = r_weights
-       return r
+       r.coeffs = dict([(k,Fraction(int(val.numerator),int(val.denominator)*c0)) for (k,val) in r_coeffs.items()])
+       return r*Fraction(1,c0)
     def tdeg(p):
         return max([sum(m) for m in p.coeffs.keys()])
     Nweight = p.Nweight
-    h = copy.deepcopy(p)
     r = DPolynomial(h.Nvar , h.Nweight , h.weightMat)
     HMG = [(p.normalize() , p.tip , tdeg(p)) for p in G if p!=0]
     if h==0:return r
@@ -421,11 +448,12 @@ def dp_nf(p , G):
             c1 = p1.coeffs[m1]
             for (m2,c2) in p1.coeffs.items():
                  m3 = iadd(rem , m2)
+                 c4 = -mpq(c2*c_h,c1)
                  if not m3 in h.weights:
                      h.weights[m3] = iadd(p1.weights[m2] , w_rem)
-                     h.coeffs[m3] = -Fraction(c2*c_h,c1)
+                     h.coeffs[m3] = c4
                  else:
-                     h.coeffs[m3] = h.coeffs[m3] - Fraction(c2*c_h,c1)
+                     h.coeffs[m3] = h.coeffs[m3] + c4
                      if h.coeffs[m3]==0:
                          del h.coeffs[m3]
                          del h.weights[m3]
@@ -435,6 +463,7 @@ def dp_nf(p , G):
             r.weights[m] = h.weights[m]
             del h.weights[m]
             r.coeffs[m] = c_h
+    r.coeffs = dict([(k,Fraction(int(val.numerator),int(val.denominator)*c0)) for (k,val) in r.coeffs.items()])
     return r
 
 
@@ -446,6 +475,7 @@ def p_nf(p , G , vars , order):
 
 
 def dp_buchberger(_G):
+    ZeroTest = False
     NoSugar = False
     def tdeg(p):
         return max( [sum(m) for m in p.coeffs.keys()] )
@@ -556,8 +586,11 @@ def dp_buchberger(_G):
             rem = idiv(p.tip , h.tip)
             if rem!=None:
                masks[n] = False
-            if prev_sugar!=s_h and not masks[n]:
+            if ZeroTest and prev_sugar!=s_h and not masks[n]:
+               t0 = time.time()
                px = dp_nf(p , [qx for qx in G if qx!=0 and qx!=p])
+               t1 = time.time()
+               nf_time += (t1-t0)
                if px==0:G[n] = px
         prev_sugar = s_h
         G.append( h )
@@ -598,7 +631,7 @@ def eqset(X , Y):
 if __name__=="__main__":
     x,y,z = Variable("x"),Variable("y"),Variable("z")
     GB = groebner([x*y+2 , x*x*x+x],[x,y],grevlex(2))
-    assert( eqset(GB , [x - Fraction(1,2)*y , y*y+4]) ),"test-1 failed"
+    assert( eqset(GB , [x - Fraction(1,2)*y , y*y+4]) ),("test-1 failed",GB)
     assert( eqset(groebner([-x**3+y, x**2*y-z], [x,y,z], grevlex(3)),[x**3 - y, y*(x**2) - z, y**2 - x*z]) ),"test-2 failed"
     assert( eqset(groebner([x*x*x-2*x*y , x*x*y-2*y*y+x],[x,y],grevlex(2)),[x**2, y**2 - Fraction(1,2)*x, y*x]) ),"test-3 failed"
     assert( eqset(groebner([x*x*x-2*x*y , x*x*y-2*y*y+x],[x,y],purelex(2)),[-2*y**2 + x, y**3]) ),"test-4 failed"
@@ -612,7 +645,8 @@ if __name__=="__main__":
     GB = [2*u2 - 1 + 2*u1 + u0, Fraction(1,5)*u2 - Fraction(3,5)*u2**2 - Fraction(1,5)*u1 + u1**2, 
           Fraction(-2,5)*u2 + Fraction(6,5)*u2**2 - Fraction(1,10)*u1 + u1*u2, 
           Fraction(1,70)*u2 - Fraction(79,210)*u2**2 + Fraction(1,30)*u1 + u2**3]
-    assert( eqset(groebner(I , [u0,u1,u2] , grevlex(3)) , GB) ),"katsura-2 failed"
+    RB = groebner(I , [u0,u1,u2] , grevlex(3))
+    assert( eqset(RB , GB) ),("katsura-2 failed",RB)
     #--katsura-3
     u0,u1,u2,u3 = Variable("u0"),Variable("u1"),Variable("u2"),Variable("u3")
     I = [u0+2*u3+2*u2+2*u1-1,2*u2*u0+2*u1*u3-u2+u1**2,2*u1*u0+2*u2*u3+2*u1*u2-u1,u0**2-u0+2*u3**2+2*u2**2+2*u1**2]
@@ -654,5 +688,4 @@ if __name__=="__main__":
     t1 = time.time()
     print("cyclic-6:{0:.3f}(sec)\n".format(t1-t0))
     assert(len(GB)==45)
-
 
