@@ -101,10 +101,8 @@ static PyObject *cx_im_mul(PyObject *self , PyObject *args){
 static PyObject *cx_dp_nf(PyObject *self , PyObject *args){
     PyObject *p;
     PyObject *arg_polList;
-    PyObject **htList;
-    //PyObject **polList;
     PyObject **wtList;
-    PyObject **cfList;
+    PyObject **hcList=NULL;
     int32_t *rem;
     int32_t *rem_weight;
     PyObject *PyZero = NULL;
@@ -115,6 +113,7 @@ static PyObject *cx_dp_nf(PyObject *self , PyObject *args){
     PyObject *r_weights = NULL;
     uint32_t Ngterm,Nbase,Nvar,Nweight,i,j,term_index;
     int32_t *htIndices;
+    int32_t *hwIndices;
     int32_t *p_htIndices;  /* working space */
     uint64_t t0,t1,t2,t3,t_red=0,t_tot;
     PyObject **flatten_coeffs;
@@ -142,14 +141,14 @@ static PyObject *cx_dp_nf(PyObject *self , PyObject *args){
     }
 
     //initialize
-    htList = (PyObject**)malloc(sizeof(PyObject*)*Nbase);
+    hcList = (PyObject**)malloc(sizeof(PyObject*)*Nbase);
     wtList = (PyObject**)malloc(sizeof(PyObject*)*Nbase);
-    cfList = (PyObject**)malloc(sizeof(PyObject*)*Nbase);
     PyZero = PyInt_FromLong(0);
     Py_INCREF(PyZero);
     rem = (int32_t*)malloc(sizeof(int32_t)*Nvar);
     rem_weight = (int32_t*)malloc(sizeof(int32_t)*Nweight);
     htIndices = (int32_t*)malloc(sizeof(int32_t)*Nvar*Nbase);
+    hwIndices = (int32_t*)malloc(sizeof(int32_t)*Nweight*Nbase);
     p_htIndices = (int32_t*)malloc(sizeof(int32_t)*Nvar);
 
     p_coeffs = PyObject_GetAttrString( p , "coeffs");
@@ -159,7 +158,6 @@ static PyObject *cx_dp_nf(PyObject *self , PyObject *args){
     for(i = 0 ; i < Nbase ; i++){
        PyObject *q = PyList_GetItem(arg_polList , i);
        wtList[i] = PyObject_GetAttrString( q , "weights" );
-       cfList[i] = PyObject_GetAttrString( q , "coeffs" );
        Ngterm += (uint32_t)PyDict_Size( wtList[i] );
     }
     flatten_weights = (int32_t*)malloc(sizeof(int32_t)*Ngterm*Nweight);
@@ -167,8 +165,9 @@ static PyObject *cx_dp_nf(PyObject *self , PyObject *args){
     flatten_coeffs = (PyObject**)malloc(sizeof(PyObject*)*Ngterm);
     startIndex = (uint32_t*)malloc(sizeof(uint32_t)*Nbase);
     for(i = 0,term_index=0 ; i < Nbase ; i++){
+         PyObject *q = PyList_GetItem(arg_polList , i);
          PyObject *q_wt = wtList[i];
-         PyObject *q_cf = cfList[i];
+         PyObject *q_cf = PyObject_GetAttrString( q , "coeffs" );
          PyObject *q_weights_keys = PyDict_Keys( q_wt );
          uint32_t k,kmax;
          startIndex[i] = term_index;
@@ -185,38 +184,44 @@ static PyObject *cx_dp_nf(PyObject *self , PyObject *args){
                   flatten_degrees[term_index*Nvar+j] = PyInt_AsLong( PyTuple_GetItem(q_key_k , j) );
               } 
          }
+         Py_DECREF( q_weights_keys );
+         Py_DECREF( q_cf );
     }
 
     /** compute leading-term list **/
     for(i = 0 ; i < Nbase ; i++){
+       PyObject *q = PyList_GetItem(arg_polList , i);
        uint32_t k,kmax;
        PyObject *ht;
        PyObject *hw = NULL;
        PyObject *q_weights = wtList[i];
+       PyObject *q_coeffs = PyObject_GetAttrString( q , "coeffs" );
        kmax = (uint32_t)PyDict_Size( q_weights );
        if(kmax==0)goto cleanup;
        {
            PyObject *q_weights_keys = PyDict_Keys( q_weights );
            ht = PyList_GetItem(q_weights_keys , 0);
            hw = PyDict_GetItem(q_weights , ht);
-           uint32_t k_best = 0;
            for(k = 1 ; k < kmax ; k++){
               PyObject *q_weights_key_k = PyList_GetItem(q_weights_keys , k);
               PyObject *q_weights_val_k = PyDict_GetItem(q_weights , q_weights_key_k );
               if( PyObject_Compare( q_weights_val_k , hw )==1 ){
                  hw = q_weights_val_k;
                  ht = q_weights_key_k;
-                 k_best = k;
               }
            }
-           htList[i] = ht;
+           hcList[i] = PyDict_GetItem(q_coeffs , ht);
            for(j = 0 ; j < Nvar ; j++){
                int32_t q_ht_cdeg = PyInt_AsLong( PyTuple_GetItem( ht , j) );
                htIndices[(i*Nvar)+j] = q_ht_cdeg;
            }
+           for(j = 0 ; j < Nweight ; j++){
+               int32_t q_ht_cweight = PyInt_AsLong( PyTuple_GetItem( hw , j) );
+               hwIndices[(i*Nweight)+j] = q_ht_cweight;
+           }
            Py_DECREF( q_weights_keys );
+           Py_DECREF( q_coeffs );
        }
-       if(q_weights)Py_DECREF( q_weights );
     }
 
     /** normal form computation **/
@@ -262,29 +267,19 @@ static PyObject *cx_dp_nf(PyObject *self , PyObject *args){
 
             /** reduce p if there is q which tip divides p.tip **/
             if(redble){
-               PyObject *q_ht = htList[i];
-               PyObject *q_weights = wtList[i];
-               PyObject *q_coeffs = cfList[i];
-               PyObject *q_hw = PyDict_GetItem( q_weights , q_ht );
                PyObject *p_hc;
                PyObject *q_hc;
                PyObject *ratio_hc;
                uint32_t term_start,term_end;
-               //t2 = rdtsc();
                for(j = 0 ; j < Nweight ; j++){
                   int32_t p_ht_cweight = PyInt_AsLong( PyTuple_GetItem( p_hw , j) );
-                  int32_t q_ht_cweight = PyInt_AsLong( PyTuple_GetItem( q_hw , j) );
+                  int32_t q_ht_cweight = hwIndices[(i*Nweight)+j];
                   rem_weight[j] = p_ht_cweight-q_ht_cweight;
                }
-#if 1
                p_hc = PyDict_GetItem( p_coeffs , p_ht );
-               q_hc = PyDict_GetItem( q_coeffs , q_ht );
-               ratio_hc = PyNumber_Negative( PyNumber_Divide(p_hc , q_hc) );
-#else
-               p_hc = PyNumber_Negative( PyDict_GetItem( p_coeffs , p_ht ) );
-               q_hc = PyDict_GetItem( q_coeffs , q_ht );
-#endif
-
+               q_hc = hcList[i];
+               ratio_hc = PyNumber_Divide(p_hc , q_hc);
+              
                t2 = rdtsc();
                term_start = startIndex[i];
                if(i==Nbase-1){
@@ -301,18 +296,10 @@ static PyObject *cx_dp_nf(PyObject *self , PyObject *args){
                      PyObject *tmp = PyInt_FromLong(rem_cdeg+q_cdeg);
                      PyTuple_SetItem( new_key , j , tmp );
                   }
-
                   if( PyDict_Contains(p_coeffs , new_key)==1 ){
                       PyObject *old_coeff = PyDict_GetItem( p_coeffs , new_key );
-#if 1
                       PyObject *tmp = PyNumber_Multiply(q_coeff_val , ratio_hc);
-                      PyObject * new_coeff = PyNumber_Add( old_coeff , tmp );
-#else
-                      PyObject *tmp = PyNumber_Multiply(q_coeff_val , p_hc);
-                      PyObject *tmp2 = PyNumber_Multiply( old_coeff , q_hc);
-                      PyObject * new_coeff = PyNumber_Add( tmp2 , tmp );
-                      Py_DECREF(tmp2);
-#endif
+                      PyObject *new_coeff = PyNumber_Subtract( old_coeff , tmp );
                       if( PyObject_Compare(new_coeff , PyZero)==0 ){
                          PyDict_DelItem( p_coeffs , new_key);
                          PyDict_DelItem( p_weights , new_key);
@@ -324,19 +311,16 @@ static PyObject *cx_dp_nf(PyObject *self , PyObject *args){
                       Py_DECREF( tmp );
                   }else{
                       PyObject *new_weight = PyTuple_New( Nweight );
-                      //PyObject *q_weight_val = PyDict_GetItem( q_weights , q_ckey );
-                      //int32_t *q_weight_val = &flatten_weights[(term_start+k)*Nweight];
-#if 1
-                      PyObject *new_coeff = PyNumber_Multiply(q_coeff_val , ratio_hc);
-#else
-                      PyObject *new_coeff = PyNumber_Multiply(q_coeff_val , p_hc);
-#endif
+                      PyObject *tmpval = PyNumber_Multiply(q_coeff_val , ratio_hc);
+                      PyObject *new_coeff = PyNumber_Negative(tmpval);
+                      Py_DECREF(tmpval);
                       PyDict_SetItem( p_coeffs , new_key , new_coeff );
                       Py_DECREF( new_coeff );
                       for(j = 0 ; j < Nweight ; j++){
                           int32_t w1 = flatten_weights[k*Nweight+j];
                           int32_t w2 = rem_weight[j];
-                          PyTuple_SetItem( new_weight , j , PyInt_FromLong( w1+w2 ) );
+                          PyObject *newval = PyInt_FromLong( w1+w2 );
+                          PyTuple_SetItem( new_weight , j , newval );
                       }
 
                       PyDict_SetItem( p_weights , new_key , new_weight );
@@ -344,9 +328,7 @@ static PyObject *cx_dp_nf(PyObject *self , PyObject *args){
                   }
                   Py_DECREF( new_key );
                }
-#if 1
                Py_DECREF( ratio_hc );
-#endif
                t3 = rdtsc();
                t_red += (t3-t2);
                break;
@@ -366,19 +348,16 @@ static PyObject *cx_dp_nf(PyObject *self , PyObject *args){
 
 cleanup:
     for(i = 0 ; i < Nbase ; i++){
-        if(htList[i])Py_DECREF( htList[i] );
-        //Py_DECREF(wtList[i]);
-        //Py_DECREF(cfList[i]);
+        Py_DECREF(wtList[i]);
     }
     free(wtList);
-    free(cfList);
-    free( htList );
+    free(hcList);
     free( startIndex );
     free( flatten_degrees );
     free( flatten_weights );
     free( flatten_coeffs );
-    //free( polList );
     if(htIndices!=NULL)free(htIndices);
+    if(hwIndices!=NULL)free(hwIndices);
     if(p_htIndices!=NULL)free(p_htIndices);
     if(rem!=NULL)free(rem);
     if(rem_weight!=NULL)free(rem_weight);
@@ -408,3 +387,4 @@ void initcgb(void)
 #ifdef __cplusplus
 }
 #endif
+
