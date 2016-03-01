@@ -628,6 +628,7 @@ def eqset(X , Y):
 
 
 
+
 if __name__=="__main__":
     x,y,z = Variable("x"),Variable("y"),Variable("z")
     GB = groebner([x*y+2 , x*x*x+x],[x,y],grevlex(2))
@@ -688,4 +689,62 @@ if __name__=="__main__":
     t1 = time.time()
     print("cyclic-6:{0:.3f}(sec)\n".format(t1-t0))
     assert(len(GB)==45)
+    #-- katsura-6
+    u5,u6 = Variable("u5"),Variable("u6")
+    I = [u0+2*u1+2*u2+2*u3+2*u4+2*u5+2*u6-1,
+         2*u5*u0+(2*u4+2*u6)*u1+2*u3*u2-u5,
+         2*u4*u0+(2*u3+2*u5)*u1+u2**2+2*u6*u2-u4,
+         2*u3*u0+(2*u2+2*u4)*u1+2*u5*u2+(2*u6-1)*u3,
+         2*u2*u0+u1**2+2*u3*u1+(2*u4-1)*u2+2*u5*u3+2*u6*u4,
+         2*u1*u0+(2*u2-1)*u1+2*u3*u2+2*u4*u3+2*u5*u4+2*u6*u5,
+         u0**2-u0+2*u1**2+2*u2**2+2*u3**2+2*u4**2+2*u5**2+2*u6**2]
+    t0 = time.time()
+    GB = groebner(I , [u0,u1,u2,u3,u4,u5,u6] , grevlex(7))
+    t1 = time.time()
+    print("katsura-6:{0:.3f}(sec)\n".format(t1-t0))
+    #-- katsura-7
+    u0,u1,u2,u3,u4 = Variable("u0"),Variable("u1"),Variable("u2"),Variable("u3"),Variable("u4")
+    u5,u6 = Variable("u5"),Variable("u6")
+    u7 = Variable("u7")
+    I = [u0+2*u1+2*u2+2*u3+2*u4+2*u5+2*u6+2*u7-1,
+         2*u6*u0+(2*u5+2*u7)*u1+2*u4*u2+u3**2-u6,
+         2*u5*u0+(2*u4+2*u6)*u1+(2*u3+2*u7)*u2-u5,
+         2*u4*u0+(2*u3+2*u5)*u1+u2**2+2*u6*u2+2*u7*u3-u4,
+         2*u3*u0+(2*u2+2*u4)*u1+2*u5*u2+(2*u6-1)*u3+2*u7*u4,
+         2*u2*u0+u1**2+2*u3*u1+(2*u4-1)*u2+2*u5*u3+2*u6*u4+2*u7*u5,
+         2*u1*u0+(2*u2-1)*u1+2*u3*u2+2*u4*u3+2*u5*u4+2*u6*u5+2*u7*u6,
+         u0**2-u0+2*u1**2+2*u2**2+2*u3**2+2*u4**2+2*u5**2+2*u6**2+2*u7**2]
+    t0 = time.time()
+    GB = groebner(I , [u0,u1,u2,u3,u4,u5,u6,u7] , grevlex(8))
+    t1 = time.time()
+    print("katsura-7:{0:.3f}(sec)\n".format(t1-t0))
+    assert(len(GB)==74)
+    #-- eco-8
+    x1,x2,x3,x4,x5,x6,x7,x8 = [Variable(x) for x in ["x1","x2","x3","x4","x5","x6","x7","x8"]]
+    I = [x1*x2*x8 + x1*x8 + x2*x3*x8 + x3*x4*x8 + x4*x5*x8 + x5*x6*x8 + x6*x7*x8 - 1,
+         x1*x3*x8 + x2*x4*x8 + x2*x8 + x3*x5*x8 + x4*x6*x8 + x5*x7*x8 - 2 ,
+         x1*x4*x8 + x2*x5*x8 + x3*x6*x8 + x3*x8 + x4*x7*x8 - 3 ,
+         x1*x5*x8 + x2*x6*x8 + x3*x7*x8 + x4*x8 - 4 ,
+         x1*x6*x8 + x2*x7*x8 + x5*x8 - 5 ,
+         x1*x7*x8 + x6*x8 - 6 ,
+         x7*x8 - 7 ,
+         x1 + x2 + x3 + x4 + x5 + x6 + x7 + 1]
+    t0 = time.time()
+    GB = groebner(I , [x1,x2,x3,x4,x5,x6,x7,x8] , grevlex(8))
+    t1 = time.time()
+    print("eco-8:{0:.3f}(sec)\n".format(t1-t0))
+    assert(len(GB)==59)
+    #-- hcyclic-7
+    h,c0,c1,c2,c3,c4,c5,c6 = [Variable(x) for x in ["h","c0","c1","c2","c3","c4","c5","c6"]]
+    I=[c6*c5*c4*c3*c2*c1*c0-h**7,
+       (((((c5+c6)*c4+c6*c5)*c3+c6*c5*c4)*c2+c6*c5*c4*c3)*c1+c6*c5*c4*c3*c2)*c0+c6*c5*c4*c3*c2*c1,
+       ((((c4+c6)*c3+c6*c5)*c2+c6*c5*c4)*c1+c6*c5*c4*c3)*c0+c5*c4*c3*c2*c1+c6*c5*c4*c3*c2,
+       (((c3+c6)*c2+c6*c5)*c1+c6*c5*c4)*c0+c4*c3*c2*c1+c5*c4*c3*c2+c6*c5*c4*c3,
+       ((c2+c6)*c1+c6*c5)*c0+c3*c2*c1+c4*c3*c2+c5*c4*c3+c6*c5*c4,
+       (c1+c6)*c0+c2*c1+c3*c2+c4*c3+c5*c4+c6*c5,
+       c0+c1+c2+c3+c4+c5+c6]
+    t0 = time.time()
+    GB = groebner(I , [h,c0,c1,c2,c3,c4,c5,c6] , grevlex(8))
+    t1 = time.time()
+    print("hcyclic-7:{0:.3f}(sec)\n".format(t1-t0))
 
