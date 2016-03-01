@@ -18,6 +18,7 @@ Benchmarks for Buchberger algorithm
 
 
 |               | buchberger.py  | Risa/Asir(gr) | Risa/Asir(nd_gr)|
+|:--------------|:--------------:|:-------------:|:---------------:|
 |cyclic-6       | 9.485sec       | 0.39sec       |  0.624sec       |
 |katsura-6      | 6.671sec       | 1.06sec       |  0.905sec       |
 |katsura-7      | 40.175sec      | 7.441sec      |  10.72sec       |
