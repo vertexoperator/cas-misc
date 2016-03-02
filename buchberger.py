@@ -5,13 +5,19 @@ except:
   import pickle
 
 from numbers import *
-from fractions import Fraction,gcd
+from fractions import Fraction
 from functools import reduce
 import copy
 import time
 
 try:
-   from gmpy2 import mpz,mpq
+   import resource
+except:
+   resource = None
+
+
+try:
+   from gmpy2 import mpz,mpq,gcd
 except:
    s = """
    Warning: gmpy2 not found.
@@ -23,6 +29,7 @@ except:
    print(s)
    mpz = int
    mpq = lambda x,y:Fraction(x,y)
+   from fractions import gcd
 
 
 try:
@@ -153,28 +160,6 @@ class Polynomial(object):
        for _ in range(n):
            ret *= self
        return ret
-   """
-   def __call__(self,**args):   #-- 代入操作
-       vars = [str(v) for v in args.keys()]
-       ucvars = [("v_%d" % n) for n in xrange(len(vars))]
-       terms = []
-       for (m,c) in self.coeffs.items():
-           if len(m.degs)==0:
-              terms.append( str(c) )
-           else:
-              mterms = []
-              for (varname , degree) in m.degs.items():
-                  if varname in vars:
-                      mterms.append('%s**%d' % (ucvars[vars.index(varname)] , degree))
-                  else:
-                      mterms.append('Symbol("%s")**%d' % (str(varname) , degree))
-              terms.append('%s*%s' % (str(c) , '*'.join(mterms)))
-       if len(terms)==0:
-           pyexpr = ("lambda %s:%s" % (",".join(ucvars) , "0"))
-       else:
-           pyexpr = ("lambda %s:%s" % (",".join(ucvars) , "+".join(terms)))
-       return apply(eval(pyexpr) , args.values())
-   """
    def __str__(self):
        terms = []
        for idx,(m,c) in enumerate(self.coeffs.items()):
@@ -295,11 +280,21 @@ class DPolynomial:
        return ret.normalize()
    def __mul__(lhs,rhs):
        if isinstance(rhs,(Number,type(mpz(0)),type(mpq(0,1)))):
-           if rhs==0:return DPolynomial(lhs.Nvar , lhs.Nweight , lhs.weightMat)
-           ret = copy.deepcopy(lhs)
+           ret = DPolynomial(lhs.Nvar , lhs.Nweight , lhs.weightMat)
+           if rhs==0:return ret
+           for (m,c) in lhs.coeffs.items():
+                ret.coeffs[m] = c*rhs
+                ret.weights[m] = lhs.weights[m]
            ret._normalized = False
-           for m,c in ret.coeffs.items():
-               ret.coeffs[m] = c*rhs
+           return ret
+       elif isinstance(lhs,(Number,type(mpz(0)),type(mpq(0,1)))):
+           ret = DPolynomial(rhs.Nvar , rhs.Nweight , rhs.weightMat)
+           if lhs==0:return ret
+           for (m,c) in rhs.coeffs.items():
+                ret.coeffs[m] = c*lhs
+                ret.weights[m] = rhs.weights[m]
+           ret._normalized = False
+           return ret
        else:
            ret = DPolynomial(lhs.Nvar , lhs.Nweight , lhs.weightMat)
            for (m1,c1) in lhs.coeffs.items():
@@ -311,13 +306,15 @@ class DPolynomial:
                 ret.weights[m3] = iadd(lhs.weights[m1] , rhs.weights[m2])
        return ret.normalize()
    def __sub__(lhs,rhs):
-       ret = copy.deepcopy(lhs)
-       ret._normalized = False
        if isinstance(rhs,(Number,type(mpz(0)),type(mpq(0,1)))):
+           ret = copy.deepcopy(lhs)
+           ret._normalized = False
            m = tuple([0]*lhs.Nvar)
            ret.coeffs[m] = ret.coeffs.get(m,0)-rhs
            ret.weights[m] = tuple([0]*lhs.Nweight)
        elif isinstance(rhs,DPolynomial):
+           ret = copy.deepcopy(lhs)
+           ret._normalized = False
            for (m,c) in rhs.coeffs.items():
                ret.coeffs[m] = ret.coeffs.get(m,0)-c
                ret.weights[m] = rhs.weights[m]
@@ -341,7 +338,7 @@ class DPolynomial:
    def __ne__(lhs,rhs):
        return not (lhs==rhs)
    def __rmul__(lhs,rhs):
-       return rhs*lhs
+       return lhs.__mul__(rhs)
    def __radd__(lhs,rhs):
        return rhs+lhs
    def __rsub__(lhs,rhs):
@@ -413,15 +410,19 @@ def p2zp(p):
 
 
 import gc
-def dp_nf(p , G):
+"""
+If zflag==True, polynomials in G should have Z-coefficients.
+
+"""
+def dp_nf(p , G , zflag=False):
     h,c0 = p2zp(p)
-    if cgb!=None:
+    if not zflag and cgb!=None:
        r_coeffs,r_weights = cgb.cx_dp_nf(h , G)
        r = DPolynomial(p.Nvar , p.Nweight , p.weightMat)
        r.coeffs = r_coeffs
        r.weights = r_weights
-       r.coeffs = dict([(k,Fraction(int(val.numerator),int(val.denominator)*c0)) for (k,val) in r_coeffs.items()])
-       return r*Fraction(1,c0)
+       r.coeffs = dict([(k,Fraction(int(val.numerator),int(val.denominator*c0))) for (k,val) in r_coeffs.items()])
+       return r
     def tdeg(p):
         return max([sum(m) for m in p.coeffs.keys()])
     Nweight = p.Nweight
@@ -446,24 +447,39 @@ def dp_nf(p , G):
             if rem==None:continue
             w_rem = isub(h.weights[m] , p1.weights[m1])
             c1 = p1.coeffs[m1]
-            for (m2,c2) in p1.coeffs.items():
-                 m3 = iadd(rem , m2)
-                 c4 = -mpq(c2*c_h,c1)
-                 if not m3 in h.weights:
+            if zflag:
+               c_g = gcd(c1 , c_h)
+               c_h //= c_g
+               c1 //= c_g
+               for m3 in h.coeffs:
+                  h.coeffs[m3] *= c1
+               for (m2,c2) in p1.coeffs.items():
+                  m3 = iadd(rem , m2)
+                  c4 = (c2*c_h)
+                  if not m3 in h.weights:
                      h.weights[m3] = iadd(p1.weights[m2] , w_rem)
-                     h.coeffs[m3] = c4
-                 else:
-                     h.coeffs[m3] = h.coeffs[m3] + c4
-                     if h.coeffs[m3]==0:
-                         del h.coeffs[m3]
-                         del h.weights[m3]
+                     h.coeffs[m3] = -c4
+                  elif h.coeffs[m3]==c4:
+                     del h.coeffs[m3]
+                     del h.weights[m3]
+                  else:
+                     h.coeffs[m3] = h.coeffs[m3] - c4
+               for m3 in r.coeffs:
+                  r.coeffs[m3] *= c1
+            else:  #-- inefficient
+               mx = DPolynomial(h.Nvar , h.Nweight , h.weightMat)
+               cx = mpq(c_h.numerator*c1.denominator,c1.numerator*c_h.denominator)
+               assert(c1*cx==c_h)
+               mx.coeffs[rem] = cx
+               mx.weights[rem] = w_rem
+               h = h - mx*p1
             break
         else:
             del h.coeffs[m]
             r.weights[m] = h.weights[m]
             del h.weights[m]
             r.coeffs[m] = c_h
-    r.coeffs = dict([(k,Fraction(int(val.numerator),int(val.denominator)*c0)) for (k,val) in r.coeffs.items()])
+    r.coeffs = dict([(k,Fraction(int(val.numerator),int(val.denominator*c0))) for (k,val) in r.coeffs.items()])
     return r
 
 
@@ -475,6 +491,7 @@ def p_nf(p , G , vars , order):
 
 
 def dp_buchberger(_G):
+    __verbose__ = False
     ZeroTest = False
     NoSugar = False
     def tdeg(p):
@@ -483,6 +500,7 @@ def dp_buchberger(_G):
     Nobs,ZR,NZR = 0,0,0
     NMP,NFP,NBP = 0,0,0
     G = [q*Fraction(1,q.coeffs[q.tip]) for q in _G if q!=0]
+    NG = [p2zp(q)[0] for q in G]
     masks = [True]*len(G)
     sugars = [tdeg(p) for p in G]
     #-- find first obstructions
@@ -525,7 +543,7 @@ def dp_buchberger(_G):
         tq.normalize()
         t0 = time.time()
         h0 = tp*p - tq*q
-        h = dp_nf(h0 , [ct for ct in G if ct!=0])
+        h = dp_nf(h0 , NG , zflag=True)
         t1 = time.time()
         nf_time += (t1-t0)
         Z.add( (i0,j0) )
@@ -594,18 +612,22 @@ def dp_buchberger(_G):
                if px==0:G[n] = px
         prev_sugar = s_h
         G.append( h )
+        NG.append( p2zp(h)[0] )
         masks.append( True )
         sugars.append( s_h )
-        print("{0} obs: HT={1}{2}{3} nb={4} nab={5} rp={6} sugar={7} t={8:.3f}".format(Nobs ,h.tip , G[i0].tip,G[j0].tip, sum(masks), len([px for px in G if px!=0]) ,len(B),s_h,t1-t0))
+        if __verbose__:
+            print("{0} obs: HT={1}{2}{3} nb={4} nab={5} rp={6} sugar={7} t={8:.3f}".format(Nobs ,h.tip , G[i0].tip,G[j0].tip, sum(masks), len([px for px in G if px!=0]) ,len(B),s_h,t1-t0))
         B.sort(key=lambda x:(x[5],x[4]) , reverse=True)
     #-- find reduced basis
-    print("start reducing (number of minimal bases={0})".format(sum(masks)))
+    if __verbose__:
+       print("start reducing (number of minimal bases={0})".format(sum(masks)))
     G = [p for (tf,p) in zip(masks,G) if tf] 
     RG = []
     for n,p in enumerate(G):
         p = dp_nf(p,RG+G[n+1:])
         if p!=0:RG.append( p*Fraction(1,p.coeffs[p.tip]) )
-    print("total obstructions={0} , NF time={1:.3f} NMP={2} NFP={3} NBP={4} ZR={5} NZR={6}\n".format(Nobs,nf_time,NMP,NFP,NBP,ZR,NZR))
+    if True or  __verbose__:
+       print("total obstructions={0} , NF time={1:.3f} NMP={2} NFP={3} NBP={4} ZR={5} NZR={6}\n".format(Nobs,nf_time,NMP,NFP,NBP,ZR,NZR))
     assert(len(G)==len(RG)),"G should be minimal bases"
     return RG
 
@@ -687,6 +709,8 @@ if __name__=="__main__":
     t0 = time.time()
     GB = groebner(I , [c0,c1,c2,c3,c4,c5] , grevlex(6))
     t1 = time.time()
+    if resource!=None:
+        print('Memory usage {0} (KB)'.format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))
     print("cyclic-6:{0:.3f}(sec)\n".format(t1-t0))
     assert(len(GB)==45)
     #-- katsura-6
@@ -701,6 +725,8 @@ if __name__=="__main__":
     t0 = time.time()
     GB = groebner(I , [u0,u1,u2,u3,u4,u5,u6] , grevlex(7))
     t1 = time.time()
+    if resource!=None:
+        print('Memory usage {0} (KB)'.format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))
     print("katsura-6:{0:.3f}(sec)\n".format(t1-t0))
     #-- katsura-7
     u0,u1,u2,u3,u4 = Variable("u0"),Variable("u1"),Variable("u2"),Variable("u3"),Variable("u4")
@@ -717,6 +743,8 @@ if __name__=="__main__":
     t0 = time.time()
     GB = groebner(I , [u0,u1,u2,u3,u4,u5,u6,u7] , grevlex(8))
     t1 = time.time()
+    if resource!=None:
+        print('Memory usage {0} (KB)'.format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))
     print("katsura-7:{0:.3f}(sec)\n".format(t1-t0))
     assert(len(GB)==74)
     #-- eco-8
@@ -732,6 +760,8 @@ if __name__=="__main__":
     t0 = time.time()
     GB = groebner(I , [x1,x2,x3,x4,x5,x6,x7,x8] , grevlex(8))
     t1 = time.time()
+    if resource!=None:
+        print('Memory usage {0} (KB)'.format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))
     print("eco-8:{0:.3f}(sec)\n".format(t1-t0))
     assert(len(GB)==59)
     #-- hcyclic-7
