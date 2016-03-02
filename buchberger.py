@@ -533,16 +533,16 @@ def dp_buchberger(_G):
         if any([(i0,k) in Z and (j0,k) in Z for k in cands]):continue
         Nobs+=1
         p,q = G[i0],G[j0]
-        tp = DPolynomial(p.Nvar , p.Nweight , p.weightMat)
-        tq = DPolynomial(q.Nvar , q.Nweight , q.weightMat)
-        tp.coeffs[um] = 1
-        tq.coeffs[vm] = 1
-        tp._normalized = False
-        tq._normalized = False
-        tp.normalize()
-        tq.normalize()
+        h0 = DPolynomial(p.Nvar , p.Nweight , p.weightMat)
+        for m in p.coeffs:
+           m3 = iadd(m,um)
+           h0.coeffs[m3] = p.coeffs[m]
+        for m in q.coeffs:
+           m3 = iadd(m,vm)
+           h0.coeffs[m3] = h0.coeffs.get(m3,0)-q.coeffs[m]
+        h0._normalized = False
+        h0.normalize()
         t0 = time.time()
-        h0 = tp*p - tq*q
         h = dp_nf(h0 , NG , zflag=True)
         t1 = time.time()
         nf_time += (t1-t0)
@@ -777,4 +777,4 @@ if __name__=="__main__":
     GB = groebner(I , [h,c0,c1,c2,c3,c4,c5,c6] , grevlex(8))
     t1 = time.time()
     print("hcyclic-7:{0:.3f}(sec)\n".format(t1-t0))
-
+    assert(len(GB)==121),"hcyclic-7 failed"
