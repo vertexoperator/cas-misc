@@ -435,6 +435,7 @@ def dp_nf(p , G , zflag=False):
         c_h = h.coeffs[m]
         if c_h==0:
             del h.coeffs[m]
+            del h.weights[m]
             continue
         deg_m = sum(m)
         if deg_m==0:
@@ -497,6 +498,7 @@ def dp_buchberger(_G):
     def tdeg(p):
         return max( [sum(m) for m in p.coeffs.keys()] )
     nf_time = 0.0
+    gm_time = 0.0
     Nobs,ZR,NZR = 0,0,0
     NMP,NFP,NBP = 0,0,0
     G = [q*Fraction(1,q.coeffs[q.tip]) for q in _G if q!=0]
@@ -534,14 +536,22 @@ def dp_buchberger(_G):
         Nobs+=1
         p,q = G[i0],G[j0]
         h0 = DPolynomial(p.Nvar , p.Nweight , p.weightMat)
+        uw = [0]*(p.Nweight)
+        vw = [0]*(q.Nweight)
+        for i in range(p.Nweight):
+            for j in range(p.Nvar):
+               uw[i] = uw[i] + p.weightMat[i][j]*um[j]
+               vw[i] = vw[i] + q.weightMat[i][j]*vm[j]
+        uw,vw=tuple(uw),tuple(vw)
         for m in p.coeffs:
            m3 = iadd(m,um)
            h0.coeffs[m3] = p.coeffs[m]
+           h0.weights[m3] = iadd(p.weights[m] , uw)
         for m in q.coeffs:
            m3 = iadd(m,vm)
            h0.coeffs[m3] = h0.coeffs.get(m3,0)-q.coeffs[m]
-        h0._normalized = False
-        h0.normalize()
+           h0.weights[m3] = iadd(q.weights[m] , vw)
+        h0._normalized = True
         t0 = time.time()
         h = dp_nf(h0 , NG , zflag=True)
         t1 = time.time()
@@ -551,6 +561,7 @@ def dp_buchberger(_G):
             ZR+=1
             prev_sugar = s_h
             continue
+        t0 = time.time()
         NZR+=1
         h = h*Fraction(1 , h.coeffs[h.tip])
         #-- Gebauer-Moeller criterion B
@@ -569,6 +580,7 @@ def dp_buchberger(_G):
                  RED.append( obs )
         for c in RED:
             B.remove( c )
+        N_B = len(B)
         #-- new obstructions
         for i,p in enumerate(G):
             if not masks[i]:continue
@@ -582,9 +594,9 @@ def dp_buchberger(_G):
         #-- Gebauer-Moeller criterion M
         RED = set([])
         hdset = set([])
-        for obs in B:
-            if obs[1]!=len(G):continue
-            for b in B:
+        for obs in B[N_B:]:
+            assert(obs[1]==len(G))
+            for b in B[N_B:]:
                if b[1]==obs[1] and b[4]!=obs[4] and idiv(obs[4],b[4])!=None:
                    RED.add( obs )
                    NMP += 1
@@ -601,15 +613,16 @@ def dp_buchberger(_G):
         for c in RED:
             B.remove( c )
         for n,p in enumerate(G):
-            rem = idiv(p.tip , h.tip)
-            if rem!=None:
+            if masks[n] and idiv(p.tip , h.tip)!=None:
                masks[n] = False
+            """
             if ZeroTest and prev_sugar!=s_h and not masks[n]:
                t0 = time.time()
                px = dp_nf(p , [qx for qx in G if qx!=0 and qx!=p])
                t1 = time.time()
                nf_time += (t1-t0)
                if px==0:G[n] = px
+            """
         prev_sugar = s_h
         G.append( h )
         NG.append( p2zp(h)[0] )
@@ -618,9 +631,9 @@ def dp_buchberger(_G):
         if __verbose__:
             print("{0} obs: HT={1}{2}{3} nb={4} nab={5} rp={6} sugar={7} t={8:.3f}".format(Nobs ,h.tip , G[i0].tip,G[j0].tip, sum(masks), len([px for px in G if px!=0]) ,len(B),s_h,t1-t0))
         B.sort(key=lambda x:(x[5],x[4]) , reverse=True)
+        t1 = time.time()
+        gm_time += (t1-t0)
     #-- find reduced basis
-    if __verbose__:
-       print("start reducing (number of minimal bases={0})".format(sum(masks)))
     G = [p for (tf,p) in zip(masks,G) if tf] 
     RG = []
     for n,p in enumerate(G):
@@ -628,6 +641,7 @@ def dp_buchberger(_G):
         if p!=0:RG.append( p*Fraction(1,p.coeffs[p.tip]) )
     if True or  __verbose__:
        print("total obstructions={0} , NF time={1:.3f} NMP={2} NFP={3} NBP={4} ZR={5} NZR={6}\n".format(Nobs,nf_time,NMP,NFP,NBP,ZR,NZR))
+       print("GM time={0:.3f}".format(gm_time))
     assert(len(G)==len(RG)),"G should be minimal bases"
     return RG
 
@@ -764,6 +778,24 @@ if __name__=="__main__":
         print('Memory usage {0} (KB)'.format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))
     print("eco-8:{0:.3f}(sec)\n".format(t1-t0))
     assert(len(GB)==59)
+    #-- eco-9
+    x1,x2,x3,x4,x5,x6,x7,x8,x9 = [Variable(x) for x in ["x1","x2","x3","x4","x5","x6","x7","x8","x9"]]
+    I = [x1*x2*x9 + x1*x9 + x2*x3*x9 + x3*x4*x9 + x4*x5*x9 + x5*x6*x9 + x6*x7*x9 + x7*x8*x9 - 1,
+ 	x1*x3*x9 + x2*x4*x9 + x2*x9 + x3*x5*x9 + x4*x6*x9 + x5*x7*x9 + x6*x8*x9 - 2,
+	x1*x4*x9 + x2*x5*x9 + x3*x6*x9 + x3*x9 + x4*x7*x9 + x5*x8*x9 - 3,
+ 	x1*x5*x9 + x2*x6*x9 + x3*x7*x9 + x4*x8*x9 + x4*x9 - 4,
+ 	x1*x6*x9 + x2*x7*x9 + x3*x8*x9 + x5*x9 - 5,
+ 	x1*x7*x9 + x2*x8*x9 + x6*x9 - 6,
+	x1*x8*x9 + x7*x9 - 7,
+ 	x8*x9 - 8,
+ 	x1 + x2 + x3 + x4 + x5 + x6 + x7 + x8 + 1]
+    t0 = time.time()
+    GB = groebner(I , [x1,x2,x3,x4,x5,x6,x7,x8,x9] , grevlex(9))
+    t1 = time.time()
+    if resource!=None:
+        print('Memory usage {0} (KB)'.format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))
+    assert(len(GB)==106)
+    print("eco-9:{0:.3f}(sec)\n".format(t1-t0))
     #-- hcyclic-7
     h,c0,c1,c2,c3,c4,c5,c6 = [Variable(x) for x in ["h","c0","c1","c2","c3","c4","c5","c6"]]
     I=[c6*c5*c4*c3*c2*c1*c0-h**7,
