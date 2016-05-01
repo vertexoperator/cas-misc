@@ -1,9 +1,4 @@
 # -*- coding:utf-8 -*-
-try:
-  import cPickle as pickle
-except:
-  import pickle
-
 from numbers import *
 from fractions import Fraction
 from functools import reduce
@@ -37,19 +32,15 @@ try:
 except:
     cgb = None
 
+
+
 class Monomial(object):
    def __init__(self):
       self.degs = {}
    def __hash__(self):
-      return hash(pickle.dumps(self.degs))
+      return hash(tuple(sorted(self.degs.items())))
    def __eq__(self , other):
-      if len(self.degs)!=len(self.degs):
-         return False
-      else:
-         for k,v in self.degs.items():
-             if other.degs.get(k,0)!=v:
-                return False
-         return True
+      return (self.degs==other.degs)
    def __mul__(self , other):
       ret = Monomial()
       vars = set(self.degs.keys()) | set(other.degs.keys())
@@ -226,13 +217,14 @@ def idiv(v1,v2):
 
 
 class DPolynomial:
-   __slots__ = ["Nvar","Nweight","coeffs","weights","weightMat","_normalized"]
+   __slots__ = ["Nvar","Nweight","coeffs","weights","weightMat","_tip","_normalized"]
    def __init__(self , Nvar , Nweight , weightMat):
        self.Nvar = Nvar
        self.Nweight = Nweight
        self.coeffs = {}
        self.weights = {}
        self.weightMat = weightMat
+       self._tip = None
        self._normalized = False
    def normalize(self):
        if self._normalized:return self
@@ -255,12 +247,17 @@ class DPolynomial:
        return self
    @property
    def tip(self):    #-- leading monomial
+       if not self._normalized:
+           self._tip = None
        self.normalize()
-       if len(self.coeffs)==0:
-          return tuple([0]*self.Nweight)
+       if self._tip!=None:
+          pass
+       elif len(self.coeffs)==0:
+          self._tip = tuple([0]*self.Nweight)
        else:
           m,w = max(self.weights.items() ,key=lambda x:x[1])
-          return m
+          self._tip = m
+       return self._tip
    def __add__(lhs , rhs):
        ret = copy.deepcopy(lhs)
        ret._normalized = False
@@ -415,8 +412,8 @@ If zflag==True, polynomials in G should have Z-coefficients.
 
 """
 def dp_nf(p , G , zflag=False):
-    h,c0 = p2zp(p)
     if not zflag and cgb!=None:
+       h,c0 = p2zp(p)
        r_coeffs,r_weights = cgb.cx_dp_nf(h , G)
        r = DPolynomial(p.Nvar , p.Nweight , p.weightMat)
        r.coeffs = r_coeffs
@@ -425,11 +422,13 @@ def dp_nf(p , G , zflag=False):
        return r
     def tdeg(p):
         return max([sum(m) for m in p.coeffs.keys()])
+    h,c0 = p2zp(p)
     Nweight = p.Nweight
     r = DPolynomial(h.Nvar , h.Nweight , h.weightMat)
     HMG = [(p.normalize() , p.tip , tdeg(p)) for p in G if p!=0]
     if h==0:return r
     while True:
+        h._tip = None
         m = h.tip
         if len(h.coeffs)==0:break
         c_h = h.coeffs[m]
@@ -450,10 +449,12 @@ def dp_nf(p , G , zflag=False):
             c1 = p1.coeffs[m1]
             if zflag:
                c_g = gcd(c1 , c_h)
+               if c_g<0:c_g = -c_g
                c_h //= c_g
                c1 //= c_g
-               for m3 in h.coeffs:
-                  h.coeffs[m3] *= c1
+               if c1!=1:
+                  for m3 in h.coeffs:
+                     h.coeffs[m3] *= c1
                for (m2,c2) in p1.coeffs.items():
                   m3 = iadd(rem , m2)
                   c4 = (c2*c_h)
@@ -465,8 +466,9 @@ def dp_nf(p , G , zflag=False):
                      del h.weights[m3]
                   else:
                      h.coeffs[m3] = h.coeffs[m3] - c4
-               for m3 in r.coeffs:
-                  r.coeffs[m3] *= c1
+               if c1!=1:
+                  for m3 in r.coeffs:
+                     r.coeffs[m3] *= c1
             else:  #-- inefficient
                mx = DPolynomial(h.Nvar , h.Nweight , h.weightMat)
                cx = mpq(c_h.numerator*c1.denominator,c1.numerator*c_h.denominator)
@@ -480,8 +482,91 @@ def dp_nf(p , G , zflag=False):
             r.weights[m] = h.weights[m]
             del h.weights[m]
             r.coeffs[m] = c_h
-    r.coeffs = dict([(k,Fraction(int(val.numerator),int(val.denominator*c0))) for (k,val) in r.coeffs.items()])
+    r.coeffs = dict([(k,Fraction(int(val.numerator),int(val.denominator))) for (k,val) in r.coeffs.items()])
     return r
+
+
+
+def dp_nf_mora(p , G):
+   USE_R = True
+   def tdeg(p):
+        degs = [sum(m) for m in p.coeffs if p.coeffs[m]!=0]
+        if len(degs)==0:return 0
+        else:return max(degs)
+   def ecart(f):
+       f_tip = f.tip
+       #assert(f.coeffs[f_tip]!=0)
+       f_deg = max([sum(m) for m in f.coeffs if f.coeffs[m]!=0])
+       return f_deg - sum(f_tip)
+   def mp2py(r):
+       if isinstance(r,Number):
+          return r
+       elif isinstance(r,(type(mpz(0)),type(mpq(0,1)))):
+          return Fraction(int(r.numerator) , int(r.denominator))
+#   h,c0 = p2zp(p)
+   h = copy.deepcopy(p)
+   r = DPolynomial(h.Nvar , h.Nweight , h.weightMat)
+   T = [(q , tdeg(q), ecart(q)) for q in G]
+   T.sort(key=lambda x:x[2])
+   while True:
+      if h==0:break
+      h._tip = None
+      h_tip = h.tip
+      h_tic = h.coeffs[h_tip]
+      h_tdeg = tdeg(h)
+      if h_tic==0:
+          del h.coeffs[h_tip]
+          del h.weights[h_tip]
+          continue
+      q,rem = None,None
+      for (q,q_deg,q_ecart) in T:
+          if q_deg>h_tdeg:continue
+          rem = idiv(h_tip , q.tip)
+          if rem!=None:
+              break
+      else:
+          if USE_R:
+             r.coeffs[h_tip] = h_tic
+             r.weights[h_tip] = h.weights[h_tip]
+             del h.coeffs[h_tip]
+             del h.weights[h_tip]
+             continue
+          else:
+             break
+#      if q_ecart>ecart(h):
+#          h0 = copy.deepcopy(h)
+#          h0.ecart = ecart(h0)
+#          T.append( (h0 , tdeg(h0) , ecart(h0))  )
+#          T.sort(key=lambda x:x[2])
+      #assert(rem!=None),(q.coeffs , h_tip , q.tip)
+      q_tic = q.coeffs[q.tip]
+      w_rem = isub(h.weights[h_tip] , q.weights[q.tip])
+      c_g = gcd(q_tic , h_tic)
+      h_tic //= c_g
+      q_tic //= c_g
+      if q_tic!=1:
+         for m2 in h.coeffs:
+            h.coeffs[m2]*=q_tic
+         for m2 in r.coeffs:
+            r.coeffs[m2]*=q_tic
+      for m2 in q.coeffs:
+           m_new = iadd(m2 , rem)
+           #cx = mpq((h_tic.numerator)*(q_tic.denominator) , (h_tic.denominator)*(q_tic.numerator))
+           #assert(cx*q_tic==h_tic)
+           c_new = h.coeffs.get(m_new,0) - h_tic*q.coeffs[m2]
+           if c_new==0:
+              if m_new in h.coeffs:
+                  del h.coeffs[m_new]
+                  del h.weights[m_new]
+           else:
+              h.coeffs[m_new] = c_new
+              h.weights[m_new] = iadd(q.weights[m2] , w_rem)
+   if USE_R:
+      r.coeffs = dict([(k,mp2py(val)) for (k,val) in r.coeffs.items()])
+      return r
+   else:
+      h.coeffs = dict([(k,mp2py(val)) for (k,val) in h.coeffs.items()])
+      return h
 
 
 def p_nf(p , G , vars , order):
@@ -500,7 +585,7 @@ def dp_buchberger(_G):
     nf_time = 0.0
     gm_time = 0.0
     Nobs,ZR,NZR = 0,0,0
-    NMP,NFP,NBP = 0,0,0
+    NMP,NFP,NBP,NCP = 0,0,0,0
     G = [q*Fraction(1,q.coeffs[q.tip]) for q in _G if q!=0]
     NG = [p2zp(q)[0] for q in G]
     masks = [True]*len(G)
@@ -528,13 +613,31 @@ def dp_buchberger(_G):
         if iadd(um,vm)==cm_h:  #-- reduces to 0
             Z.add( (i0,j0) )
             continue
-        cands = [k for (k,p) in enumerate(G) if idiv(cm_h,p.tip)!=None]
-        if any([(i0,k) in Z and (k,j0) in Z for k in cands]):continue
-        if any([(k,i0) in Z and (k,j0) in Z for k in cands]):continue
-        if any([(k,i0) in Z and (j0,k) in Z for k in cands]):continue
-        if any([(i0,k) in Z and (j0,k) in Z for k in cands]):continue
+        #-- chain criterion
+        check = False
+        assert(i0<j0)
+        for (k,p) in enumerate(G):
+            if idiv(cm_h,p.tip)==None:continue
+            if (i0,k) in Z and (k,j0) in Z:
+                check=True
+                break
+            elif (k,i0) in Z and (k,j0) in Z:
+                check=True
+                break
+            elif (i0,k) in Z and (j0,k) in Z:
+                check=True
+                break
+        if check:
+            Z.add( (i0,j0) )
+            NCP += 1
+            continue
         Nobs+=1
         p,q = G[i0],G[j0]
+#        p_tic = p.coeffs[p.tip]
+#        q_tic = q.coeffs[q.tip]
+#        gcd_tic = gcd(p_tic, q_tic)
+#        p_tic//=gcd_tic
+#        q_tic//=gcd_tic
         h0 = DPolynomial(p.Nvar , p.Nweight , p.weightMat)
         uw = [0]*(p.Nweight)
         vw = [0]*(q.Nweight)
@@ -554,6 +657,7 @@ def dp_buchberger(_G):
         h0._normalized = True
         t0 = time.time()
         h = dp_nf(h0 , NG , zflag=True)
+#        h = dp_nf_mora(h0 , NG)
         t1 = time.time()
         nf_time += (t1-t0)
         Z.add( (i0,j0) )
@@ -561,7 +665,6 @@ def dp_buchberger(_G):
             ZR+=1
             prev_sugar = s_h
             continue
-        t0 = time.time()
         NZR+=1
         h = h*Fraction(1 , h.coeffs[h.tip])
         #-- Gebauer-Moeller criterion B
@@ -615,14 +718,6 @@ def dp_buchberger(_G):
         for n,p in enumerate(G):
             if masks[n] and idiv(p.tip , h.tip)!=None:
                masks[n] = False
-            """
-            if ZeroTest and prev_sugar!=s_h and not masks[n]:
-               t0 = time.time()
-               px = dp_nf(p , [qx for qx in G if qx!=0 and qx!=p])
-               t1 = time.time()
-               nf_time += (t1-t0)
-               if px==0:G[n] = px
-            """
         prev_sugar = s_h
         G.append( h )
         NG.append( p2zp(h)[0] )
@@ -631,17 +726,14 @@ def dp_buchberger(_G):
         if __verbose__:
             print("{0} obs: HT={1}{2}{3} nb={4} nab={5} rp={6} sugar={7} t={8:.3f}".format(Nobs ,h.tip , G[i0].tip,G[j0].tip, sum(masks), len([px for px in G if px!=0]) ,len(B),s_h,t1-t0))
         B.sort(key=lambda x:(x[5],x[4]) , reverse=True)
-        t1 = time.time()
-        gm_time += (t1-t0)
     #-- find reduced basis
-    G = [p for (tf,p) in zip(masks,G) if tf] 
+    G = [p for (tf,p) in zip(masks,G) if tf]
     RG = []
     for n,p in enumerate(G):
         p = dp_nf(p,RG+G[n+1:])
         if p!=0:RG.append( p*Fraction(1,p.coeffs[p.tip]) )
-    if True or  __verbose__:
-       print("total obstructions={0} , NF time={1:.3f} NMP={2} NFP={3} NBP={4} ZR={5} NZR={6}\n".format(Nobs,nf_time,NMP,NFP,NBP,ZR,NZR))
-       print("GM time={0:.3f}".format(gm_time))
+    if __verbose__:
+       print("total obstructions={0} , NF time={1:.3f} NMP={2} NFP={3} NBP={4} NCP={5} ZR={6} NZR={7}".format(Nobs,nf_time,NMP,NFP,NBP,NCP,ZR,NZR))
     assert(len(G)==len(RG)),"G should be minimal bases"
     return RG
 
@@ -712,7 +804,7 @@ if __name__=="__main__":
     t1 = time.time()
     assert(len(GB)==20),"cyclic-5 failed"
     print("cyclic-5:{0:.3f}(sec)\n".format(t1-t0))
-    #-- cyclic-6 benchmark(currently too slow)
+    #-- cyclic-6 benchmark
     c0,c1,c2,c3,c4,c5 = Variable("c0"),Variable("c1"),Variable("c2"),Variable("c3"),Variable("c4"),Variable("c5")
     I = [c5*c4*c3*c2*c1*c0-1,
          ((((c4+c5)*c3+c5*c4)*c2+c5*c4*c3)*c1+c5*c4*c3*c2)*c0+c5*c4*c3*c2*c1,
