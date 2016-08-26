@@ -7,14 +7,14 @@ except:
 
 from numbers import *
 from itertools import takewhile
-from fractions import Fraction,gcd
+from fractions import Fraction
 import copy
 import math
 from functools import reduce
 
 
 try:
-   from gmpy2 import mpz,mpq
+   from gmpy2 import mpz,mpq,gcd
 except:
    s = """
    Warning: gmpy2 not found.
@@ -26,7 +26,7 @@ except:
    print(s)
    mpz = int
    mpq = lambda x,y:Fraction(x,y)
-
+   from fractions import gcd
 
 
 
@@ -583,7 +583,7 @@ def nc_p2zp(p):
 
 
 import time
-def dnc_nf(p , _G):
+def dnc_nf(p , _G , zflag=False):
     def tip(p):
        return max(p.coeffs.keys())
     if len(p.coeffs)==1:return p
@@ -591,43 +591,79 @@ def dnc_nf(p , _G):
     r = DExpression(p.Nvar)
     Nvar = p.Nvar
     G = [p.simplify() for p in _G if p!=0]
-    HMG = [(p*mpq(1,p.coeffs[tip(p)]) , tip(p)) for p in G]
+    HMG = [(p , tip(p)) for p in G]
     while True:
        m = tip(h)
        if m==0:
-           r.coeffs[m] = h.coeffs[m]
+           r.coeffs[m] = mpq(h.coeffs[m] , cx)
            break
-       c0 = h.coeffs[m]
-       if c0==0:
+       c_h = h.coeffs[m]
+       if c_h==0:
            del h.coeffs[m]
            continue
        for (p1,m1) in HMG:
-#           assert(p1.coeffs[m1]==1),(p1.coeffs[m1],m1)
            if m<m1:continue
            if m==m1:
-               h -= p1*c0
+               if zflag:
+                  c_ptip = p1.coeffs[m1]
+                  c_g = gcd(c_ptip , c_h)
+                  if c_g<0:c_g = -c_g
+                  c_h //= c_g
+                  c_ptip //= c_g
+                  for m3 in h.coeffs:h.coeffs[m3] *= c_ptip
+                  for m3 in p1.coeffs:
+                      h.coeffs[m3] = h.coeffs.get(m3,0) - c_h*p1.coeffs[m3]
+                  cx *= c_ptip
+               else:
+                  ct = mpq((c_h.numerator)*(p1.coeffs[m1].denominator) , (c_h.denominator)*(p1.coeffs[m1].numerator))
+                  assert(ct*p1.coeffs[m1]==c_h),(ct,c_h,p1.coeffs[m1])
+                  h -= p1*ct
+               assert(h.coeffs.get(m,0)==0),(h.coeffs,m,p1.coeffs,zflag)
                break
            rem = im_div_with_deg(m , m1 , Nvar)
            if rem!=None:
+              c_ptip = p1.coeffs[m1]
               um,vm,udeg,vdeg = rem
-              for (m2,c2) in p1.coeffs.items():
-                  deg2 = ideg(m2 , Nvar)
-                  pu,pc,pv = Nvar**udeg,Nvar**deg2,Nvar**vdeg
-                  m3 = pv*(m2-(pc-1)//(Nvar-1))+(vm-(pv-1)//(Nvar-1))
-                  m3 = (pu*pc*pv-1)//(Nvar-1) + (pc*pv)*(um-(pu-1)//(Nvar-1)) + m3
-                  #assert(m3==im_mul(um , im_mul(m2, vm,Nvar) , Nvar)),(m2,um,vm,m3)
-                  c4 = h.coeffs.get(m3,0) - c0*c2
-                  if c4!=0 or m3==0:
-                     h.coeffs[m3] = c4
-                  elif m3 in h.coeffs:
-                     del h.coeffs[m3]
+              if zflag:
+                 c_g = gcd(c_ptip , c_h)
+                 if c_g<0:c_g = -c_g
+                 c_h //= c_g
+                 c_ptip //= c_g
+                 cx *= c_ptip
+                 if c_ptip!=1:
+                    for m3 in h.coeffs:
+                        h.coeffs[m3] *= c_ptip
+                 for (m2,c2) in p1.coeffs.items():
+                     deg2 = ideg(m2 , Nvar)
+                     pu,pc,pv = Nvar**udeg,Nvar**deg2,Nvar**vdeg
+                     m3 = pv*(m2-(pc-1)//(Nvar-1))+(vm-(pv-1)//(Nvar-1))
+                     m3 = (pu*pc*pv-1)//(Nvar-1) + (pc*pv)*(um-(pu-1)//(Nvar-1)) + m3
+                     c4 = h.coeffs.get(m3,0) - c_h*c2
+                     if c4!=0 or m3==0:
+                        h.coeffs[m3] = c4
+                     elif m3 in h.coeffs:
+                        del h.coeffs[m3]
+              else:
+                 for (m2,c2) in p1.coeffs.items():
+                    deg2 = ideg(m2 , Nvar)
+                    pu,pc,pv = Nvar**udeg,Nvar**deg2,Nvar**vdeg
+                    m3 = pv*(m2-(pc-1)//(Nvar-1))+(vm-(pv-1)//(Nvar-1))
+                    m3 = (pu*pc*pv-1)//(Nvar-1) + (pc*pv)*(um-(pu-1)//(Nvar-1)) + m3
+                    #assert(m3==im_mul(um , im_mul(m2, vm,Nvar) , Nvar)),(m2,um,vm,m3)
+                    ct = mpq(c_h*c2 , c_ptip)
+                    c4 = h.coeffs.get(m3,0) - ct
+                    assert(ct*c_ptip==c_h*c2)
+                    if c4!=0 or m3==0:
+                        h.coeffs[m3] = c4
+                    elif m3 in h.coeffs:
+                        del h.coeffs[m3]
               #assert(im_mul(um , im_mul(m1,vm,Nvar),Nvar)==m)
               #assert(tip(h)<m),(tip(h),m)
               break
        else:
            del h.coeffs[m]
-           r.coeffs[m] = c0
-    r.coeffs = dict([(k,Fraction(int(v.numerator),cx*int(v.denominator))) for (k,v) in r.coeffs.items()])
+           r.coeffs[m] = mpq(c_h,cx)
+    r.coeffs = dict([(k,Fraction(int(v.numerator),int(v.denominator))) for (k,v) in r.coeffs.items()])
     return r
 
 
@@ -684,6 +720,7 @@ def dp_mora(_G):
     def tip(p):
         return max(p.coeffs.keys())
     G = [q*Fraction(1,q.coeffs[tip(q)]) for q in _G if q!=0]
+    NG = [nc_p2zp(q)[0] for q in G]
     B = []
     #-- inter-reduction
     while True:
@@ -730,13 +767,14 @@ def dp_mora(_G):
         u1.coeffs[lm1] = 1
         v1.coeffs[rm1] = 1
         t0 = time.time()
-        p2 = dnc_nf(u0*p0*v0 - u1*p1*v1 , G)
+        p2 = dnc_nf(u0*p0*v0 - u1*p1*v1 , NG , zflag=True)
         t1 = time.time()
         if t1-t0>5.0:
            print("1 obstruction removed (time:{0:.3f}) (rp={1})".format(t1-t0 , len(B)))
         if p2==0:continue
         p2 = p2*Fraction(1, p2.coeffs[tip(p2)])
         G.append(p2)
+        NG.append( nc_p2zp(p2)[0] )
         masks.append( True )
         sugars.append( s_h )
         m2 = tip(p2)
@@ -1039,4 +1077,4 @@ def lv2_15():
 if __name__=="__main__":
    test_mora()
    test_gs()
-
+#   virasoro()
